@@ -338,7 +338,12 @@ def bowlerstat(df):
 # print(bat_summary.head())
 # print(bowl_summary.head())
 pdf = load_data()
+pdf['match_id']=pdf['p_match']
 
+pdf['batting_team']=pdf['team_bat']
+pdf['bowling_team']=pdf['team_bowl']
+pdf['batsman']=pdf['bat']
+pdf['bowler']=pdf['bowl']
 bpdf = pdf
 idf = cumulator(pdf)
 bidf = load_bowling_data()
