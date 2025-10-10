@@ -638,270 +638,133 @@ if sidebar_option == "Player Profile":
     try:
         idf
     except NameError:
-        st.error("idf not defined. Run idf = Custom(df) before showing Player Profile.")
+        st.error("⚠️ Please run idf = Custom(df) before showing Player Profile.")
         st.stop()
 
-    # Defensive: ensure idf has batsman column
+    # Rename to batsman if needed
     if 'batsman' not in idf.columns:
         if 'bat' in idf.columns:
             idf = idf.rename(columns={'bat': 'batsman'})
         else:
-            st.error("idf must contain a 'batsman' column (or 'bat'). Ensure Custom(df) output is correct.")
+            st.error("Dataset must contain a 'batsman' or 'bat' column.")
             st.stop()
 
     # Player selector
     players = sorted(idf['batsman'].dropna().unique().tolist())
-    if len(players) == 0:
-        st.error("No players found in idf. Check Custom(df) output.")
+    if not players:
+        st.error("No players found in dataset.")
         st.stop()
+
     player_name = st.selectbox("Search for a player", players, index=0)
 
-    # Single tab: Career Statistics
+    # Tabs
     tabs = st.tabs(["Career Statistics"])
     with tabs[0]:
         st.header("Career Statistics")
 
-        # select stat type (Batting/Bowling)
+        # Option to choose between Batting and Bowling
         option = st.selectbox("Select Career Stat Type", ("Batting", "Bowling"))
 
-        # -----------------------
-        # Batting branch
-        # -----------------------
+        # -------------------- BATTING PROFILE --------------------
         if option == "Batting":
-            # select player row(s) from idf (ensure DataFrame)
-            player_selection = idf[idf['batsman'] == player_name]
+            player_stats = idf[idf['batsman'] == player_name]
+            if player_stats.empty:
+                st.warning(f"No data available for {player_name}.")
+                st.stop()
 
-            if player_selection.empty:
-                st.warning(f"No summary found for {player_name}.")
-            else:
-                # Guarantee DataFrame
-                if isinstance(player_selection, pd.Series):
-                    player_stats = player_selection.to_frame().T.copy()
-                else:
-                    player_stats = player_selection.copy()
+            player_stats = player_stats.drop(columns=['final_year'], errors='ignore')
+            player_stats.columns = [col.upper().replace('_', ' ') for col in player_stats.columns]
+            player_stats = round_up_floats(player_stats)
 
-                # Drop final_year safely
-                player_stats = player_stats.drop(columns=['final_year'], errors='ignore')
+            # Clean integer-type columns
+            for c in ['RUNS', 'HUNDREDS', 'FIFTIES', 'THIRTIES', 'HIGHEST SCORE']:
+                if c in player_stats.columns:
+                    player_stats[c] = player_stats[c].fillna(0).astype(int)
 
-                # Prepare display copy and normalize column names
-                display_stats = player_stats.copy()
-                display_stats.columns = [col.upper().replace('_', ' ') for col in display_stats.columns]
+            st.markdown("### 🏏 Batting Statistics")
+            st.table(player_stats.style.set_table_attributes("style='font-weight: bold;'"))
 
-                # Round floats (use helper if available)
-                try:
-                    display_stats = round_up_floats(display_stats)
-                except Exception:
-                    float_cols = display_stats.select_dtypes(include=['float64', 'float32']).columns
-                    display_stats[float_cols] = display_stats[float_cols].round(2)
-
-                st.markdown("### Batting Statistics")
-
-                # Safely convert key integer columns if present
-                columns_to_convert = ['RUNS', 'HUNDREDS', 'FIFTIES', 'THIRTIES', 'HIGHEST SCORE']
-                col_list = list(display_stats.columns)
-                for c in columns_to_convert:
-                    if c in col_list:
-                        # fillna then cast
-                        display_stats[c] = display_stats[c].fillna(0).astype(int)
-
-                st.table(display_stats.style.set_table_attributes("style='font-weight: bold;'"))
-
-            # ---------------------------
-            # Opponent-wise performance
-            # ---------------------------
-            # raw df is pdf (alias of df). Detect batter column
-            bat_col = 'batsman' if 'batsman' in pdf.columns else ('bat' if 'bat' in pdf.columns else None)
-            if bat_col is None:
-                st.error("Raw dataframe missing batter column ('bat' or 'batsman').")
-            else:
-                # opponents where this batter faced deliveries
-                opponents = sorted(pdf[pdf[bat_col] == player_name]['team_bowl'].dropna().unique().tolist())
-                opponent_df_list = []
+            # -------------------------------------------------------
+            # OPPONENTWISE PERFORMANCE
+            # -------------------------------------------------------
+            bat_col = 'batsman' if 'batsman' in df.columns else ('bat' if 'bat' in df.columns else None)
+            if bat_col:
+                opponents = sorted(df[df[bat_col] == player_name]['team_bowl'].dropna().unique().tolist())
+                all_opp = []
                 for opp in opponents:
-                    temp_df = pdf[(pdf[bat_col] == player_name) & (pdf['team_bowl'] == opp)].copy()
-                    if temp_df.empty:
-                        continue
-
-                    # normalize column names expected by cumulator
-                    rename_map = {}
-                    if 'p_match' in temp_df.columns and 'match_id' not in temp_df.columns:
-                        rename_map['p_match'] = 'match_id'
-                    if 'inns' in temp_df.columns and 'inning' not in temp_df.columns:
-                        rename_map['inns'] = 'inning'
-                    if 'bat' in temp_df.columns and 'batsman' not in temp_df.columns:
-                        rename_map['bat'] = 'batsman'
-                    if 'batruns' in temp_df.columns and 'batsman_runs' not in temp_df.columns:
-                        rename_map['batruns'] = 'batsman_runs'
-                    temp_df = temp_df.rename(columns=rename_map)
-
-                    try:
-                        temp_summary = cumulator(temp_df)
-                    except Exception as e:
-                        st.warning(f"cumulator failed for opponent {opp}: {e}")
-                        continue
-
-                    if temp_summary.empty:
-                        continue
-
-                    temp_summary['OPPONENT'] = opp
-                    # put OPPONENT first
-                    cols = temp_summary.columns.tolist()
-                    cols = ['OPPONENT'] + [c for c in cols if c != 'OPPONENT']
-                    temp_summary = temp_summary[cols]
-                    opponent_df_list.append(temp_summary)
-
-                if opponent_df_list:
-                    result_df = pd.concat(opponent_df_list, ignore_index=True).drop(columns=['batsman','debut_year','final_year'], errors='ignore')
-                    # display-friendly column names
-                    result_df.columns = [col.upper().replace('_', ' ') for col in result_df.columns]
-
-                    # convert key integer columns safely
-                    conv_cols = ['HUNDREDS', 'FIFTIES', 'THIRTIES', 'RUNS', 'HIGHEST SCORE']
-                    rcols = list(result_df.columns)
-                    for c in conv_cols:
-                        if c in rcols:
-                            result_df[c] = result_df[c].fillna(0).astype(int)
-
-                    # round floats
-                    try:
-                        result_df = round_up_floats(result_df)
-                    except Exception:
-                        float_cols = result_df.select_dtypes(include=['float']).columns
-                        result_df[float_cols] = result_df[float_cols].round(2)
-
-                    # reorder for display
-                    cols = result_df.columns.tolist()
-                    new_order = []
-                    if 'OPPONENT' in cols:
-                        new_order.append('OPPONENT')
-                    if 'MATCHES' in cols:
-                        new_order.append('MATCHES')
-                    new_order += [c for c in cols if c not in new_order]
-                    result_df = result_df[new_order]
-
-                    st.markdown("### Opponent-wise Performance")
-                    st.table(result_df.style.set_table_attributes("style='font-weight: bold;'"))
-                else:
-                    st.markdown("### Opponent-wise Performance")
-                    st.write("No opponent-wise data available for this player.")
-
-            # ---------------------------
-            # Season-wise performance
-            # ---------------------------
-            if 'year' in pdf.columns:
-                seasons = sorted(pdf[pdf[bat_col] == player_name]['year'].dropna().unique().tolist())
-            else:
-                seasons = []
-
-            season_list = []
-            for season in seasons:
-                temp_df = pdf[(pdf[bat_col] == player_name) & (pdf['year'] == season)].copy()
-                if temp_df.empty:
-                    continue
-                rename_map = {}
-                if 'p_match' in temp_df.columns and 'match_id' not in temp_df.columns:
-                    rename_map['p_match'] = 'match_id'
-                if 'inns' in temp_df.columns and 'inning' not in temp_df.columns:
-                    rename_map['inns'] = 'inning'
-                if 'bat' in temp_df.columns and 'batsman' not in temp_df.columns:
-                    rename_map['bat'] = 'batsman'
-                if 'batruns' in temp_df.columns and 'batsman_runs' not in temp_df.columns:
-                    rename_map['batruns'] = 'batsman_runs'
-                temp_df = temp_df.rename(columns=rename_map)
-
-                try:
-                    temp_summary = cumulator(temp_df)
-                except Exception as e:
-                    st.warning(f"cumulator failed for season {season}: {e}")
-                    continue
-
-                temp_summary['YEAR'] = season
-                season_list.append(temp_summary)
-
-            if season_list:
-                result_seasons = pd.concat(season_list, ignore_index=True).drop(columns=['batsman','debut_year','final_year'], errors='ignore')
-                result_seasons.columns = [col.upper().replace('_', ' ') for col in result_seasons.columns]
-
-                conv_cols = ['RUNS', 'HUNDREDS', 'FIFTIES', 'THIRTIES', 'HIGHEST SCORE']
-                scols = list(result_seasons.columns)
-                for c in conv_cols:
-                    if c in scols:
-                        result_seasons[c] = result_seasons[c].fillna(0).astype(int)
-
-                try:
-                    result_seasons = round_up_floats(result_seasons)
-                except Exception:
-                    float_cols = result_seasons.select_dtypes(include=['float']).columns
-                    result_seasons[float_cols] = result_seasons[float_cols].round(2)
-
-                cols = result_seasons.columns.tolist()
-                new_order = ['YEAR'] if 'YEAR' in cols else []
-                if 'MATCHES' in cols and 'MATCHES' not in new_order:
-                    new_order.append('MATCHES')
-                new_order += [c for c in cols if c not in new_order]
-                result_seasons = result_seasons[new_order]
-
-                st.markdown("### Year-wise Performance")
-                st.table(result_seasons.style.set_table_attributes("style='font-weight: bold;'"))
-            else:
-                st.markdown("### Year-wise Performance")
-                st.write("No season-wise data available for this player.")
-
-            # ---------------------------
-            # Inning-wise performance (IPL: innings 1 & 2)
-            # ---------------------------
-            inning_col = 'inning' if 'inning' in pdf.columns else ('inns' if 'inns' in pdf.columns else None)
-            if inning_col is None:
-                st.write("No inning column (inns/inning) found in raw data; skipping inning-wise breakdown.")
-            else:
-                tdf = pdf[pdf[bat_col] == player_name].copy()
-                inning_results = []
-                for inn in [1, 2]:
-                    temp = tdf[tdf[inning_col] == inn].copy()
+                    temp = df[(df[bat_col] == player_name) & (df['team_bowl'] == opp)].copy()
                     if temp.empty:
                         continue
-                    rename_map = {}
-                    if 'p_match' in temp.columns and 'match_id' not in temp.columns:
-                        rename_map['p_match'] = 'match_id'
-                    if inning_col == 'inns' and 'inning' not in temp.columns:
-                        rename_map['inns'] = 'inning'
-                    if 'bat' in temp.columns and 'batsman' not in temp.columns:
-                        rename_map['bat'] = 'batsman'
-                    if 'batruns' in temp.columns and 'batsman_runs' not in temp.columns:
-                        rename_map['batruns'] = 'batsman_runs'
-                    temp = temp.rename(columns=rename_map)
+                    temp = temp.rename(columns={'p_match': 'match_id'}, errors='ignore')
+                    temp = cumulator(temp)
+                    if not temp.empty:
+                        temp['OPPONENT'] = opp
+                        all_opp.append(temp)
+                if all_opp:
+                    result_df = pd.concat(all_opp, ignore_index=True).drop(columns=['batsman', 'debut_year', 'final_year'], errors='ignore')
+                    result_df.columns = [col.upper().replace('_', ' ') for col in result_df.columns]
+                    for c in ['HUNDREDS', 'FIFTIES', 'THIRTIES', 'RUNS', 'HIGHEST SCORE']:
+                        if c in result_df.columns:
+                            result_df[c] = result_df[c].fillna(0).astype(int)
+                    result_df = round_up_floats(result_df)
+                    st.markdown("### 🆚 Opponentwise Performance")
+                    st.table(result_df.style.set_table_attributes("style='font-weight: bold;'"))
 
-                    try:
-                        s = cumulator(temp)
-                    except Exception as e:
-                        st.warning(f"cumulator failed for inning {inn}: {e}")
+            # -------------------------------------------------------
+            # YEAWISE PERFORMANCE
+            # -------------------------------------------------------
+            if 'year' in df.columns:
+                seasons = sorted(df[df[bat_col] == player_name]['year'].dropna().unique().tolist())
+                all_seasons = []
+                for season in seasons:
+                    temp = df[(df[bat_col] == player_name) & (df['year'] == season)].copy()
+                    if temp.empty:
                         continue
+                    temp = temp.rename(columns={'p_match': 'match_id'}, errors='ignore')
+                    temp = cumulator(temp)
+                    if not temp.empty:
+                        temp['YEAR'] = season
+                        all_seasons.append(temp)
+                if all_seasons:
+                    result_df = pd.concat(all_seasons, ignore_index=True).drop(columns=['batsman', 'debut_year', 'final_year'], errors='ignore')
+                    result_df.columns = [col.upper().replace('_', ' ') for col in result_df.columns]
+                    for c in ['RUNS', 'HUNDREDS', 'FIFTIES', 'THIRTIES', 'HIGHEST SCORE']:
+                        if c in result_df.columns:
+                            result_df[c] = result_df[c].fillna(0).astype(int)
+                    result_df = round_up_floats(result_df)
+                    st.markdown("### 📅 Yearwise Performance")
+                    st.table(result_df.style.set_table_attributes("style='font-weight: bold;'"))
 
-                    s['INNING'] = inn
-                    inning_results.append(s)
+            # -------------------------------------------------------
+            # INNINGWISE PERFORMANCE
+            # -------------------------------------------------------
+            inning_col = 'inns' if 'inns' in df.columns else ('inning' if 'inning' in df.columns else None)
+            if inning_col:
+                innings_list = []
+                for inn in sorted(df[inning_col].dropna().unique()):
+                    temp = df[(df[bat_col] == player_name) & (df[inning_col] == inn)].copy()
+                    if temp.empty:
+                        continue
+                    temp = temp.rename(columns={'p_match': 'match_id'}, errors='ignore')
+                    temp = cumulator(temp)
+                    if not temp.empty:
+                        temp['INNING'] = inn
+                        innings_list.append(temp)
+                if innings_list:
+                    result_df = pd.concat(innings_list, ignore_index=True).drop(columns=['batsman', 'debut_year', 'final_year'], errors='ignore')
+                    result_df.columns = [col.upper().replace('_', ' ') for col in result_df.columns]
+                    for c in ['RUNS', 'HUNDREDS', 'FIFTIES', 'THIRTIES', 'HIGHEST SCORE']:
+                        if c in result_df.columns:
+                            result_df[c] = result_df[c].fillna(0).astype(int)
+                    result_df = round_up_floats(result_df)
+                    result_df = result_df.drop(columns=['MATCHES'], errors='ignore')
+                    st.markdown("### 🏟️ Inningwise Performance")
+                    st.table(result_df.reset_index(drop=True).style.set_table_attributes("style='font-weight: bold;'"))
 
-                if inning_results:
-                    final_innings = pd.concat(inning_results, ignore_index=True).drop(columns=['batsman','debut_year','final_year'], errors='ignore')
-                    final_innings.columns = [col.upper().replace('_', ' ') for col in final_innings.columns]
+        # -------------------- BOWLING PROFILE --------------------
+        elif option == "Bowling":
+            st.info("🎯 Bowling module will be integrated after validation of bowl_rec().")
 
-                    conv_cols = ['RUNS', 'HUNDREDS', 'FIFTIES', 'THIRTIES', 'HIGHEST SCORE']
-                    fin_cols = list(final_innings.columns)
-                    for c in conv_cols:
-                        if c in fin_cols:
-                            final_innings[c] = final_innings[c].fillna(0).astype(int)
-
-                    try:
-                        final_innings = round_up_floats(final_innings)
-                    except Exception:
-                        float_cols = final_innings.select_dtypes(include=['float']).columns
-                        final_innings[float_cols] = final_innings[float_cols].round(2)
-
-                    final_innings = final_innings.drop(columns=['MATCHES'], errors='ignore')
-                    st.markdown("### Inning-wise Performance")
-                    st.table(final_innings.reset_index(drop=True).style.set_table_attributes("style='font-weight: bold;'"))
-                else:
-                    st.markdown("### Inning-wise Performance")
-                    st.write("No inning-wise data available for this player.")
 
         # -----------------------
         # Bowling placeholder branch
