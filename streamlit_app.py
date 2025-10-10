@@ -653,56 +653,63 @@ if sidebar_option == "Player Profile":
 # Player Profile -> Batting
 # -------------------
         if option == "Batting":
-            # Defensive column handling: idf should already have 'batsman'
+            # Ensure idf has batsman column
             if 'batsman' not in idf.columns:
                 if 'bat' in idf.columns:
                     idf = idf.rename(columns={'bat': 'batsman'})
                 else:
-                    st.error("idf missing 'batsman' column. Ensure Custom(df) produced per-batsman summary.")
+                    st.error("idf must contain a 'batsman' column. Check Custom(df) output.")
                     st.stop()
         
-            player_stats = idf[idf['batsman'] == player_name].copy()
-            # Drop final_year if present (safe)
+            # Select player rows (keep as DataFrame)
+            player_selection = idf[idf['batsman'] == player_name]
+        
+            if player_selection.empty:
+                st.warning(f"No summary found for {player_name}.")
+                st.stop()
+        
+            # If the selection accidentally became a Series, convert back to DataFrame
+            if isinstance(player_selection, pd.Series):
+                player_stats = player_selection.to_frame().T.copy()
+            else:
+                player_stats = player_selection.copy()
+        
+            # Sanity log (shows up in Streamlit logs)
+            st.write(f"DEBUG: player_stats shape = {player_stats.shape}")
+        
+            # Drop final_year if present
             player_stats = player_stats.drop(columns=['final_year'], errors='ignore')
         
-            # Standardize display column names
-            player_stats.columns = [col.upper().replace('_', ' ') for col in player_stats.columns]
+            # Standardize display column names (but keep original df intact by operating on a copy)
+            display_stats = player_stats.copy()
+            display_stats.columns = [col.upper().replace('_', ' ') for col in display_stats.columns]
         
-            # Round floats (use your helper)
+            # Round floats (use your helper; fallback to round(2))
             try:
-                player_stats = round_up_floats(player_stats)
+                display_stats = round_up_floats(display_stats)
             except Exception:
-                float_cols = player_stats.select_dtypes(include=['float64', 'float32']).columns
-                player_stats[float_cols] = player_stats[float_cols].round(2)
+                float_cols = display_stats.select_dtypes(include=['float64', 'float32']).columns
+                display_stats[float_cols] = display_stats[float_cols].round(2)
         
             st.markdown("### Batting Statistics")
             columns_to_convert = ['RUNS', 'HUNDREDS', 'FIFTIES', 'THIRTIES', 'HIGHEST SCORE']
-            # Fill & cast sensible integer columns if present
             for c in columns_to_convert:
-                if c in player_stats.columns:
-                    player_stats[c] = player_stats[c].fillna(0).astype(int)
+                if c in display_stats.columns:
+                    display_stats[c] = display_stats[c].fillna(0).astype(int)
         
-            st.table(player_stats.style.set_table_attributes("style='font-weight: bold;'"))
+            st.table(display_stats.style.set_table_attributes("style='font-weight: bold;'"))
         
-            # ------------------------
-            # Opponent-wise performance (team_bowl / team_bowl)
-            # ------------------------
-            # Defensive detection of raw-data column names
+            # --- Opponent-wise (same logic as before but defensive renames) ---
             bat_col = 'batsman' if 'batsman' in pdf.columns else ('bat' if 'bat' in pdf.columns else None)
-            opp_col = 'team_bowl' if 'team_bowl' in pdf.columns else ('team_bowl' if 'team_bowl' in pdf.columns else ('team_bowl' if 'team_bowl' in pdf.columns else 'team_bowl'))
-            # prefer 'team_bowl' per your schema; fall back to 'team_bowl' string (keeps consistent)
             if bat_col is None:
-                st.error("Raw dataframe missing batter column ('bat' or 'batsman').")
+                st.error("Raw df missing batter column ('bat' or 'batsman').")
                 st.stop()
         
-            # get list of opponents (unique bowling teams where this batter faced)
-            opponents = sorted(pdf[pdf[bat_col] == player_name][ 'team_bowl' ].dropna().unique().tolist())
-        
+            opponents = sorted(pdf[pdf[bat_col] == player_name]['team_bowl'].dropna().unique().tolist())
             opponent_df_list = []
             for opp in opponents:
-                # filter raw PDF for this player vs current opponent
                 temp_df = pdf[(pdf[bat_col] == player_name) & (pdf['team_bowl'] == opp)].copy()
-                # Normalize names expected by cumulator: match_id, inning, batsman
+                # normalize names expected by cumulator
                 rename_map = {}
                 if 'p_match' in temp_df.columns and 'match_id' not in temp_df.columns:
                     rename_map['p_match'] = 'match_id'
@@ -714,44 +721,37 @@ if sidebar_option == "Player Profile":
                     rename_map['batruns'] = 'batsman_runs'
                 temp_df = temp_df.rename(columns=rename_map)
         
-                # If temp_df empty after filtering, skip
                 if temp_df.empty:
                     continue
         
-                # Apply cumulator (expects per-ball df with cumulative or per-ball columns)
                 try:
                     temp_summary = cumulator(temp_df)
                 except Exception as e:
-                    st.error(f"cumulator failed for opponent {opp}: {e}")
+                    st.warning(f"cumulator failed for opponent {opp}: {e}")
                     continue
         
                 if temp_summary.empty:
                     continue
         
                 temp_summary['OPPONENT'] = opp
-                # place opponent as first column
                 cols = temp_summary.columns.tolist()
                 cols = ['OPPONENT'] + [c for c in cols if c != 'OPPONENT']
                 temp_summary = temp_summary[cols]
                 opponent_df_list.append(temp_summary)
         
-            # combine and clean
             if opponent_df_list:
                 result_df = pd.concat(opponent_df_list, ignore_index=True).drop(columns=['batsman','debut_year','final_year'], errors='ignore')
-                # uppercase col names for display
                 result_df.columns = [col.upper().replace('_', ' ') for col in result_df.columns]
                 conv_cols = ['HUNDREDS', 'FIFTIES', 'THIRTIES', 'RUNS', 'HIGHEST SCORE']
                 for c in conv_cols:
                     if c in result_df.columns:
                         result_df[c] = result_df[c].fillna(0).astype(int)
-                # Round floats
                 try:
                     result_df = round_up_floats(result_df)
                 except Exception:
                     float_cols = result_df.select_dtypes(include=['float']).columns
                     result_df[float_cols] = result_df[float_cols].round(2)
         
-                # Reorder so opponent & matches appear first if present
                 cols = result_df.columns.tolist()
                 new_order = []
                 if 'OPPONENT' in cols:
