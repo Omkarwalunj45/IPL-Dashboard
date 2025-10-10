@@ -340,6 +340,8 @@ def bowlerstat(df):
 pdf = load_data()
 pdf['match_id']=pdf['p_match']
 
+pdf['inn_id']=pdf['p_match']
+
 pdf['batting_team']=pdf['team_bat']
 pdf['bowling_team']=pdf['team_bowl']
 pdf['batsman']=pdf['bat']
