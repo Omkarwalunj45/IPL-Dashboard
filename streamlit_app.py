@@ -1771,11 +1771,11 @@ elif sidebar_option == "Matchup Analysis":
             for col in out.columns: 
                 out[col] = pd.to_numeric(out[col], errors='ignore')
             out=round_up_floats(out)
-            # for col in out.columns: 
-            #     if any(x in col.lower() for x in ['innings', 'runs', 'balls']):
-            #         out[col] = out[col].fillna(0).astype(int)
-            #     elif out[col].dtype in ['float64', 'float32']:
-            #         out[col] = out[col].round(2)
+            for col in out.columns: 
+                if any(x in col.lower() for x in ['innings', 'runs', 'balls']):
+                    out[col] = out[col].fillna(0).astype(int)
+                elif out[col].dtype in ['float64', 'float32','float']:
+                    out[col] = out[col].round(2)
             
             # Replace None/NaN with dash
             out = out.fillna('-')
