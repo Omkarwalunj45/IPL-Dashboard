@@ -1160,42 +1160,50 @@ if option == "Batting":
 
 
 elif option == "Bowling":
-    # Defensive: ensure bidf (summary idf for bowlers) and bpdf (ball-by-ball for bowlers) exist
-    bpdf=df
-    bidf=bowlerstat(df)
-    # try:
-    #     bidf
-    #     bpdf
-    # except NameError:
-    #     st.error("Bowling view requires 'bidf' (bowling summary) and 'bpdf' (bowling ball-by-ball). Please load them.")
-    #     st.stop()
-
-    # Normalize to DataFrame and ensure bowler column exists
-    temp_df = as_dataframe(bidf)
-    if 'bowler' not in temp_df.columns:
-        st.error("bidf must contain a 'bowler' column.")
+    # Defensive: ensure raw ball-by-ball df exists
+    try:
+        df
+    except NameError:
+        st.error("Bowling view requires the raw ball-by-ball DataFrame 'df'. Please load it.")
         st.stop()
 
-    # Player-specific summary row(s)
-    player_stats = temp_df[temp_df['bowler'] == player_name].copy()
+    # bpdf is the ball-by-ball (same as df)
+    bpdf = as_dataframe(df)
+
+    # build bidf (bowling summary) from bowlerstat; do it defensively
+    try:
+        bidf = as_dataframe(bowlerstat(bpdf))
+    except Exception as e:
+        st.error(f"Failed to build bowling summary (bidf) from bowlerstat(): {e}")
+        st.stop()
+
+    # Ensure 'bowler' exists in bidf
+    if 'bowler' not in bidf.columns:
+        st.error("bidf must contain a 'bowler' column returned from bowlerstat().")
+        st.stop()
+
+    # Select player's bowling summary rows
+    player_stats = bidf[bidf['bowler'] == player_name].copy()
     player_stats = as_dataframe(player_stats)
+
     if player_stats.empty:
         st.markdown("No bowling stats available for the selected player.")
     else:
-        # prepare display copy: uppercase names & round floats
+        # display copy: uppercase column names & round floats
         disp_stats = player_stats.copy()
         disp_stats.columns = [str(col).upper().replace('_', ' ') for col in disp_stats.columns]
         disp_stats = round_up_floats(disp_stats)
 
-        # Top metric mapping for bowlers
-        def find_col(df, candidates):
+        # helper to find column by candidates
+        def find_col(df_local, candidates):
             for cand in candidates:
-                if cand in df.columns:
+                if cand in df_local.columns:
                     return cand
             return None
 
+        # top metrics mapping for bowlers (ordered)
         top_metric_mapping = {
-            "Overs": ["OVERS", "OVERS BOWLED", "OVERS "],
+            "Overs": ["OVERS", "OVERS "],
             "Runs": ["RUNS", "RUNS CONCEDED"],
             "Wickets": ["WKTS", "WICKETS", "WICKETS "],
             "Innings": ["INNINGS", "MATCHES"],
@@ -1203,11 +1211,11 @@ elif option == "Bowling":
             "Average": ["AVG", "AVERAGE"],
             "Strike Rate": ["SR", "STRIKE RATE"],
             "Maidens": ["MAIDEN OVERS", "MAIDENS"],
-            "3w Hauls": ["THREE_WICKET_HAULS", "3WICKETHAULS", "3W"],
+            "3w Hauls": ["THREE_WICKET_HAULS", "3W", "THREE WICKET HAULS"],
             "BBI": ["BBI", "BEST BBI", "BEST"]
         }
 
-        # Collect top metrics
+        # collect top metric values
         found_top_cols = {}
         for label, candidates in top_metric_mapping.items():
             col = find_col(disp_stats, candidates)
@@ -1221,7 +1229,11 @@ elif option == "Bowling":
 
         st.markdown("### Bowling Statistics")
 
-        visible_metrics = [(k, v) for k, v in found_top_cols.items() if v is not None and not (isinstance(v, float) and np.isnan(v))]
+        # show top metrics as metric cards
+        visible_metrics = [
+            (k, v) for k, v in found_top_cols.items()
+            if v is not None and not (isinstance(v, float) and np.isnan(v))
+        ]
         if visible_metrics:
             cols = st.columns(len(visible_metrics))
             for (label, val), col in zip(visible_metrics, cols):
@@ -1235,11 +1247,12 @@ elif option == "Bowling":
         else:
             st.write("Top bowling metrics not available.")
 
-        # Detailed stats vertical table (include RUNS)
-        # Remove top metrics except keep 'RUNS' in the detailed table
+        # -------------------------
+        # Detailed stats (vertical key:value). keep RUNS displayed
+        # -------------------------
         top_cols_used = [find_col(disp_stats, cand) for cand in top_metric_mapping.values()]
         top_cols_used = [c for c in top_cols_used if c is not None]
-        top_cols_used_excluding_runs = [c for c in top_cols_used if c is not None and c.upper() != 'RUNS']
+        top_cols_used_excluding_runs = [c for c in top_cols_used if c is not None and str(c).upper() != 'RUNS']
 
         try:
             rest_series = disp_stats.iloc[0].drop(labels=top_cols_used_excluding_runs, errors='ignore')
@@ -1256,13 +1269,12 @@ elif option == "Bowling":
                 if isinstance(x, (int, np.integer)):
                     return int(x)
                 if isinstance(x, (float, np.floating)):
-                    # show two decimals for floats
                     return round(x, 2)
                 return x
 
             rest_df["Value"] = rest_df["Value"].apply(fmt_val)
 
-            # Light skin (peach) header for detailed stats
+            # light skin / peach header color
             detailed_header_color = "#fff0e6"
             detailed_table_styles = [
                 {"selector": "thead th", "props": [("background-color", detailed_header_color), ("color", "#000"), ("font-weight", "600")]},
@@ -1275,17 +1287,19 @@ elif option == "Bowling":
         else:
             st.write("No detailed bowling metrics available.")
 
-    # --------------------
+    # -------------------------
     # Opponentwise Performance
-    # --------------------
-    # Determine appropriate bat/team columns
-    bat_col = 'batsman' if 'batsman' in bpdf.columns else ('bat' if 'bat' in bpdf.columns else None)
-    opp_col = safe_get_col(bpdf, ['team_bat', 'team_bowl', 'team_bowling', 'batting_team'], default=None)
+    # -------------------------
+    # Determine batting-team/opponent column candidates (we want the team batting against the bowler)
+    opp_candidates = ['team_bat', 'team_batting', 'batting_team', 'team_batting', 'team_bowl']
+    opp_col = safe_get_col(bpdf, opp_candidates, default=None)
 
-    if bat_col is None or opp_col is None:
-        st.info("Opponentwise breakdown not available (missing team/batsman columns).")
+    # bowler's name column in ball-by-ball
+    if 'bowler' not in bpdf.columns:
+        st.info("Ball-by-ball data missing 'bowler' column; opponentwise breakdown not available.")
+    elif opp_col is None:
+        st.info("Could not detect opponent/team batting column (expected one of team_bat/team_batting/batting_team).")
     else:
-        # Find opponents list for this bowler
         opponents = sorted(bpdf[bpdf['bowler'] == player_name][opp_col].dropna().unique().tolist())
         all_opp = []
         for opp in opponents:
@@ -1293,57 +1307,68 @@ elif option == "Bowling":
             if temp.empty:
                 continue
             temp_summary = bowlerstat(temp)
-            if not temp_summary.empty:
-                temp_summary['OPPONENT'] = opp.upper()
-                # ensure opponent is first column
-                cols = temp_summary.columns.tolist()
-                if 'OPPONENT' in temp_summary.columns:
-                    temp_summary = temp_summary[['OPPONENT'] + [c for c in cols if c != 'OPPONENT']]
-                all_opp.append(temp_summary)
+            temp_summary = as_dataframe(temp_summary)
+            if temp_summary.empty:
+                continue
+            temp_summary['OPPONENT'] = opp.upper()
+            # ensure OPPONENT is first col
+            cols = temp_summary.columns.tolist()
+            if 'OPPONENT' in temp_summary.columns:
+                temp_summary = temp_summary[['OPPONENT'] + [c for c in cols if c != 'OPPONENT']]
+            all_opp.append(temp_summary)
+
         if all_opp:
             result_df = pd.concat(all_opp, ignore_index=True).drop(columns=['bowler'], errors='ignore')
             result_df.columns = [str(col).upper().replace('_', ' ') for col in result_df.columns]
-            # safe numeric casts for typical columns
+            # safe numeric casts for key columns
             for c in ['RUNS', 'WKTS', 'BALLS', 'OVERS', 'ECON', 'AVG']:
                 if c in result_df.columns:
                     result_df[c] = pd.to_numeric(result_df[c], errors='coerce').fillna(0)
             result_df = round_up_floats(result_df)
 
-            # Light blue header for opponent table
+            # light blue header for Opponent table
             opp_header_color = "#e6f2ff"
             opp_table_styles = [
                 {"selector": "thead th", "props": [("background-color", opp_header_color), ("color", "#000"), ("font-weight", "600")]},
                 {"selector": "tbody tr:nth-child(odd)", "props": [("background-color", "#ffffff")]},
                 {"selector": "tbody tr:nth-child(even)", "props": [("background-color", "#f7fbff")]},
             ]
+
             st.markdown("### Opponentwise Performance")
             st.dataframe(result_df.style.set_table_styles(opp_table_styles), use_container_width=True)
         else:
             st.info("No opponentwise bowling summary available for this player.")
 
-    # --------------------
-    # Yearwise Performance
-    # --------------------
-    if 'season' in bpdf.columns:
+    # -------------------------
+    # Yearwise Performance (season or year)
+    # -------------------------
+    # detect season col candidates
+    season_col = safe_get_col(bpdf, ['season', 'year'], default=None)
+    if season_col and 'bowler' in bpdf.columns:
         tdf = bpdf[bpdf['bowler'] == player_name].copy()
-        unique_seasons = sorted(tdf['season'].dropna().unique().tolist())
+        unique_seasons = sorted(tdf[season_col].dropna().unique().tolist())
         all_seasons = []
         for season in unique_seasons:
-            temp = tdf[tdf['season'] == season].copy()
+            temp = tdf[tdf[season_col] == season].copy()
+            if temp.empty:
+                continue
             temp_summary = bowlerstat(temp)
-            if not temp_summary.empty:
-                temp_summary['YEAR'] = season
-                # place YEAR first
-                cols = temp_summary.columns.tolist()
-                if 'YEAR' in temp_summary.columns:
-                    temp_summary = temp_summary[['YEAR'] + [c for c in cols if c != 'YEAR']]
-                all_seasons.append(temp_summary)
+            temp_summary = as_dataframe(temp_summary)
+            if temp_summary.empty:
+                continue
+            temp_summary['YEAR'] = season
+            # put YEAR first
+            cols = temp_summary.columns.tolist()
+            if 'YEAR' in temp_summary.columns:
+                temp_summary = temp_summary[['YEAR'] + [c for c in cols if c != 'YEAR']]
+            all_seasons.append(temp_summary)
+
         if all_seasons:
             result_df = pd.concat(all_seasons, ignore_index=True).drop(columns=['bowler'], errors='ignore')
             result_df.columns = [str(col).upper().replace('_', ' ') for col in result_df.columns]
             result_df = round_up_floats(result_df)
 
-            # Light purple header for year table
+            # light purple header for Year table
             year_header_color = "#efe6ff"
             year_table_styles = [
                 {"selector": "thead th", "props": [("background-color", year_header_color), ("color", "#000"), ("font-weight", "600")]},
@@ -1355,13 +1380,15 @@ elif option == "Bowling":
             st.dataframe(result_df.style.set_table_styles(year_table_styles), use_container_width=True)
         else:
             st.info("No yearwise bowling summary available for this player.")
+    else:
+        st.info("Yearwise breakdown not available (missing 'season' / 'year' column).")
 
-    # --------------------
+    # -------------------------
     # Inningwise Performance
-    # --------------------
+    # -------------------------
     inning_col = 'inns' if 'inns' in bpdf.columns else ('inning' if 'inning' in bpdf.columns else None)
-    if inning_col is None:
-        st.info("Inningwise breakdown not available (missing 'inns' / 'inning' column).")
+    if inning_col is None or 'bowler' not in bpdf.columns:
+        st.info("Inningwise breakdown not available (missing 'inns'/'inning' or 'bowler' column).")
     else:
         tdf = bpdf[bpdf['bowler'] == player_name].copy()
         innings_list = []
@@ -1370,18 +1397,21 @@ elif option == "Bowling":
             if temp.empty:
                 continue
             temp_summary = bowlerstat(temp)
-            if not temp_summary.empty:
-                temp_summary['INNING'] = inn
-                cols = temp_summary.columns.tolist()
-                if 'INNING' in temp_summary.columns:
-                    temp_summary = temp_summary[['INNING'] + [c for c in cols if c != 'INNING']]
-                innings_list.append(temp_summary)
+            temp_summary = as_dataframe(temp_summary)
+            if temp_summary.empty:
+                continue
+            temp_summary['INNING'] = inn
+            cols = temp_summary.columns.tolist()
+            if 'INNING' in temp_summary.columns:
+                temp_summary = temp_summary[['INNING'] + [c for c in cols if c != 'INNING']]
+            innings_list.append(temp_summary)
+
         if innings_list:
             result_df = pd.concat(innings_list, ignore_index=True).drop(columns=['bowler'], errors='ignore')
             result_df.columns = [str(col).upper().replace('_', ' ') for col in result_df.columns]
             result_df = round_up_floats(result_df)
 
-            # Light green header for inning table
+            # light green header for Inning table
             inning_header_color = "#e9f9ea"
             inning_table_styles = [
                 {"selector": "thead th", "props": [("background-color", inning_header_color), ("color", "#000"), ("font-weight", "600")]},
