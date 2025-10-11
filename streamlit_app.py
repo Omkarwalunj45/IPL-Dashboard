@@ -1375,16 +1375,6 @@ elif option == "Bowling":
         else:
             st.write("No detailed bowling metrics available.")
 
-# Defensive helper (use safe_get_col if available)
-try:
-    safe_get_col
-except NameError:
-    def safe_get_col(df_local, candidates, default=None):
-        for c in candidates:
-            if c in df_local.columns:
-                return c
-        return default
-
 # Use the raw ball-by-ball df
 bpdf = as_dataframe(df)
 
