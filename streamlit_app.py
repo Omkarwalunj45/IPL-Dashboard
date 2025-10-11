@@ -1793,6 +1793,7 @@ elif sidebar_option == "Matchup Analysis":
         # -------------------
         # Year grouping
         # -------------------
+        matchup_df=round_up_floats(matchup_df)
         if grouping_option == "Year":
             if year_col is None:
                 st.info("Year/season column not detected in dataset.")
