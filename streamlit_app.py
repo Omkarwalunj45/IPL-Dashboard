@@ -1300,7 +1300,6 @@ elif option == "Bowling":
             "Econ": ["ECON", "ECONOMY"],
             "Average": ["AVG", "AVERAGE"],
             "Strike Rate": ["SR", "STRIKE RATE"],
-            "Maidens": ["MAIDEN OVERS", "MAIDENS"],
             "3w Hauls": ["THREE_WICKET_HAULS", "3W", "THREE WICKET HAULS"],
             "BBI": ["BBI", "BEST BBI", "BEST"]
         }
