@@ -1660,6 +1660,22 @@ elif sidebar_option == "Matchup Analysis":
             else:
                 return pd.DataFrame(x)
 
+    try:
+        safe_get_col
+    except NameError:
+        def safe_get_col(df_local, candidates, default=None):
+            for c in candidates:
+                if c in df_local.columns:
+                    return c
+            return default
+
+    # Ensure df exists
+    try:
+        df
+    except NameError:
+        st.error("Raw ball-by-ball DataFrame 'df' not found. Load data before using Matchup Analysis.")
+        st.stop()
+
     bdf = as_dataframe(df)
 
     # Detect column names in your data
@@ -1767,11 +1783,14 @@ elif sidebar_option == "Matchup Analysis":
             
             # CRITICAL FORMATTING: Convert to numeric, then int for specific cols, round others
             for col in out.columns: out[col] = pd.to_numeric(out[col], errors='ignore')
-            for col in out.columns: out[col] = out[col].fillna(0).astype(int) if any(x in col.lower() for x in ['innings', 'runs', 'balls']) else (out[col].round(2) if out[col].dtype in ['float64', 'float32'] else out[col])
+            for col in out.columns: out[col] = out[col].fillna(0).astype(int) if any(x in col.lower() for x in ['innings', 'runs', 'balls']) else out[col]
+            # Round all remaining float columns to 2 decimals
+            float_cols = out.select_dtypes(include=['float64', 'float32']).columns
+            for col in float_cols: out[col] = out[col].round(2)
             
             # Now normalize display column names
             out = normalize_display_columns(out)
-            out = round_up_floats(out)
+            
             # Ensure primary column name is uppercase & spaced
             primary_col_name_norm = str(primary_col_name).upper().replace('_', ' ')
             
@@ -1793,7 +1812,6 @@ elif sidebar_option == "Matchup Analysis":
         # -------------------
         # Year grouping
         # -------------------
-        matchup_df=round_up_floats(matchup_df)
         if grouping_option == "Year":
             if year_col is None:
                 st.info("Year/season column not detected in dataset.")
