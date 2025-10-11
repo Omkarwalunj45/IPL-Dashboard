@@ -145,7 +145,7 @@ def categorize_phase(over):
 # -------------------------
 # Custom - batting summary with exact dismissal rules
 # -------------------------
-def Custom(df: pd.DataFrame) -> pd.DataFrame:
+def cumulator(df: pd.DataFrame) -> pd.DataFrame:
     """
     Build batting summary (one row per batsman) and apply the user-specified dismissal rules:
       - legal_ball counts only if both wide==0 and noball==0
