@@ -641,18 +641,37 @@ if sidebar_option == "Player Profile":
         st.error("⚠️ Please run idf = Custom(df) before showing Player Profile.")
         st.stop()
 
-    # Rename to batsman if needed
+    # Defensive: ensure df exists (we use df for opponent/year/inning breakdowns)
+    try:
+        df
+    except NameError:
+        st.error("⚠️ This view requires the original raw 'df' (ball-by-ball / match-level dataframe). Please ensure 'df' is loaded.")
+        st.stop()
+
+    # Helper to coerce Series -> DataFrame and copy
+    def as_dataframe(x):
+        if isinstance(x, pd.Series):
+            return x.to_frame().T.reset_index(drop=True)
+        elif isinstance(x, pd.DataFrame):
+            return x.copy()
+        else:
+            return pd.DataFrame(x)
+
+    idf = as_dataframe(idf)
+    df = as_dataframe(df)
+
+    # Normalize batsman column name in idf
     if 'batsman' not in idf.columns:
         if 'bat' in idf.columns:
             idf = idf.rename(columns={'bat': 'batsman'})
         else:
-            st.error("Dataset must contain a 'batsman' or 'bat' column.")
+            st.error("Dataset must contain a 'batsman' or 'bat' column in idf.")
             st.stop()
 
     # Player selector
     players = sorted(idf['batsman'].dropna().unique().tolist())
     if not players:
-        st.error("No players found in dataset.")
+        st.error("No players found in idf dataset.")
         st.stop()
 
     player_name = st.selectbox("Search for a player", players, index=0)
@@ -667,19 +686,22 @@ if sidebar_option == "Player Profile":
 
         # -------------------- BATTING PROFILE --------------------
         if option == "Batting":
-            player_stats = idf[idf['batsman'] == player_name]
+            # Select player rows from idf (ensure DataFrame)
+            player_stats = as_dataframe(idf[idf['batsman'] == player_name])
             if player_stats.empty:
                 st.warning(f"No data available for {player_name}.")
                 st.stop()
 
+            # Remove unwanted columns, uppercase column names and round floats
             player_stats = player_stats.drop(columns=['final_year'], errors='ignore')
-            player_stats.columns = [col.upper().replace('_', ' ') for col in player_stats.columns]
+            player_stats.columns = [str(col).upper().replace('_', ' ') for col in player_stats.columns]
             player_stats = round_up_floats(player_stats)
 
-            # # Clean integer-type columns
-            # for c in ['RUNS', 'HUNDREDS', 'FIFTIES', 'THIRTIES', 'HIGHEST SCORE']:
-            #     if c in player_stats.columns:
-            #         player_stats[c] = player_stats[c].fillna(0).astype(int)
+            # Clean integer-type columns safely
+            int_cols = ['RUNS', 'HUNDREDS', 'FIFTIES', 'THIRTIES', 'HIGHEST SCORE']
+            for c in int_cols:
+                if c in player_stats.columns:
+                    player_stats[c] = pd.to_numeric(player_stats[c], errors='coerce').fillna(0).astype(int)
 
             st.markdown("### 🏏 Batting Statistics")
             st.table(player_stats.style.set_table_attributes("style='font-weight: bold;'"))
@@ -696,24 +718,25 @@ if sidebar_option == "Player Profile":
                     if temp.empty:
                         continue
                     temp = temp.rename(columns={'p_match': 'match_id'}, errors='ignore')
-                    temp = cumulator(temp)
+                    temp = cumulator(temp)  # assumes cumulator returns a DataFrame
+                    temp = as_dataframe(temp)
                     if not temp.empty:
                         temp['OPPONENT'] = opp
                         all_opp.append(temp)
                 if all_opp:
                     result_df = pd.concat(all_opp, ignore_index=True).drop(columns=['batsman', 'debut_year', 'final_year'], errors='ignore')
-                    result_df.columns = [col.upper().replace('_', ' ') for col in result_df.columns]
+                    result_df.columns = [str(col).upper().replace('_', ' ') for col in result_df.columns]
                     for c in ['HUNDREDS', 'FIFTIES', 'THIRTIES', 'RUNS', 'HIGHEST SCORE']:
                         if c in result_df.columns:
-                            result_df[c] = result_df[c].fillna(0).astype(int)
+                            result_df[c] = pd.to_numeric(result_df[c], errors='coerce').fillna(0).astype(int)
                     result_df = round_up_floats(result_df)
                     st.markdown("### 🆚 Opponentwise Performance")
                     st.table(result_df.style.set_table_attributes("style='font-weight: bold;'"))
 
             # -------------------------------------------------------
-            # YEAWISE PERFORMANCE
+            # YEARWISE PERFORMANCE
             # -------------------------------------------------------
-            if 'year' in df.columns:
+            if 'year' in df.columns and bat_col:
                 seasons = sorted(df[df[bat_col] == player_name]['year'].dropna().unique().tolist())
                 all_seasons = []
                 for season in seasons:
@@ -722,15 +745,16 @@ if sidebar_option == "Player Profile":
                         continue
                     temp = temp.rename(columns={'p_match': 'match_id'}, errors='ignore')
                     temp = cumulator(temp)
+                    temp = as_dataframe(temp)
                     if not temp.empty:
                         temp['YEAR'] = season
                         all_seasons.append(temp)
                 if all_seasons:
                     result_df = pd.concat(all_seasons, ignore_index=True).drop(columns=['batsman', 'debut_year', 'final_year'], errors='ignore')
-                    result_df.columns = [col.upper().replace('_', ' ') for col in result_df.columns]
+                    result_df.columns = [str(col).upper().replace('_', ' ') for col in result_df.columns]
                     for c in ['RUNS', 'HUNDREDS', 'FIFTIES', 'THIRTIES', 'HIGHEST SCORE']:
                         if c in result_df.columns:
-                            result_df[c] = result_df[c].fillna(0).astype(int)
+                            result_df[c] = pd.to_numeric(result_df[c], errors='coerce').fillna(0).astype(int)
                     result_df = round_up_floats(result_df)
                     st.markdown("### 📅 Yearwise Performance")
                     st.table(result_df.style.set_table_attributes("style='font-weight: bold;'"))
@@ -739,7 +763,7 @@ if sidebar_option == "Player Profile":
             # INNINGWISE PERFORMANCE
             # -------------------------------------------------------
             inning_col = 'inns' if 'inns' in df.columns else ('inning' if 'inning' in df.columns else None)
-            if inning_col:
+            if inning_col and bat_col:
                 innings_list = []
                 for inn in sorted(df[inning_col].dropna().unique()):
                     temp = df[(df[bat_col] == player_name) & (df[inning_col] == inn)].copy()
@@ -747,15 +771,16 @@ if sidebar_option == "Player Profile":
                         continue
                     temp = temp.rename(columns={'p_match': 'match_id'}, errors='ignore')
                     temp = cumulator(temp)
+                    temp = as_dataframe(temp)
                     if not temp.empty:
                         temp['INNING'] = inn
                         innings_list.append(temp)
                 if innings_list:
                     result_df = pd.concat(innings_list, ignore_index=True).drop(columns=['batsman', 'debut_year', 'final_year'], errors='ignore')
-                    result_df.columns = [col.upper().replace('_', ' ') for col in result_df.columns]
+                    result_df.columns = [str(col).upper().replace('_', ' ') for col in result_df.columns]
                     for c in ['RUNS', 'HUNDREDS', 'FIFTIES', 'THIRTIES', 'HIGHEST SCORE']:
                         if c in result_df.columns:
-                            result_df[c] = result_df[c].fillna(0).astype(int)
+                            result_df[c] = pd.to_numeric(result_df[c], errors='coerce').fillna(0).astype(int)
                     result_df = round_up_floats(result_df)
                     result_df = result_df.drop(columns=['MATCHES'], errors='ignore')
                     st.markdown("### 🏟️ Inningwise Performance")
@@ -765,11 +790,5 @@ if sidebar_option == "Player Profile":
         elif option == "Bowling":
             st.info("🎯 Bowling module will be integrated after validation of bowl_rec().")
 
-
-        # -----------------------
-        # Bowling placeholder branch
-        # -----------------------
-        elif option == "Bowling":
-            st.info("Bowling view not yet implemented — select Batting for now.")
 
         
