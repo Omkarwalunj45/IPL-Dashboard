@@ -1379,6 +1379,7 @@ elif option == "Bowling":
     # Opponentwise Performance
     # -------------------------
     # Determine batting-team/opponent column candidates (we want the team batting against the bowler)
+    bpdf=df
     opp_candidates = ['team_bat', 'team_batting', 'batting_team', 'team_batting', 'team_bowl']
     opp_col = safe_get_col(bpdf, opp_candidates, default=None)
 
@@ -1431,6 +1432,7 @@ elif option == "Bowling":
     # Yearwise Performance (season or year)
     # -------------------------
     # detect season col candidates
+    bpdf=df
     season_col = safe_get_col(bpdf, ['season', 'year'], default=None)
     if season_col and 'bowler' in bpdf.columns:
         tdf = bpdf[bpdf['bowler'] == player_name].copy()
@@ -1474,6 +1476,7 @@ elif option == "Bowling":
     # -------------------------
     # Inningwise Performance
     # -------------------------
+    bpdf=df
     inning_col = 'inns' if 'inns' in bpdf.columns else ('inning' if 'inning' in bpdf.columns else None)
     if inning_col is None or 'bowler' not in bpdf.columns:
         st.info("Inningwise breakdown not available (missing 'inns'/'inning' or 'bowler' column).")
