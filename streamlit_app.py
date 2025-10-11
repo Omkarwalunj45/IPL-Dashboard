@@ -1646,11 +1646,6 @@ if sidebar_option == "Player Profile":
 
 elif sidebar_option == "Matchup Analysis":
 
-    st.header("Matchup Analysis")
-    elif sidebar_option == "Matchup Analysis":
-
-    st.header("Matchup Analysis")
-
     # Defensive helper fallbacks (use your existing ones if present)
     try:
         as_dataframe
