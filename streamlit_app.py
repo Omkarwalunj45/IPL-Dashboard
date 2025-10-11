@@ -1068,198 +1068,199 @@ if sidebar_option == "Player Profile":
         #                 result_df = round_up_floats(result_df)
         #                 st.markdown("### 🏟️ Inningwise Performance")
         #                 st.dataframe(result_df.reset_index(drop=True), use_container_width=True)
-        def batting_stats_display(df, idf, player_name, option):
-            if option == "Batting":
-                player_stats = idf[idf['batsman'] == player_name]
-                if player_stats is None or player_stats.empty:
-                    st.warning(f"No data available for {player_name}.")
-                    st.stop()
-        
-                # cleanup & formatting
-                player_stats = player_stats.drop(columns=['final_year'], errors='ignore')
-                player_stats.columns = [str(col).upper().replace('_', ' ').replace('MIDDLE1', 'MIDDLE 1').replace('MIDDLE2', 'MIDDLE 2') for col in player_stats.columns]
-                player_stats = round_up_floats(player_stats)
-        
-                int_cols = ['RUNS', 'HUNDREDS', 'FIFTIES', 'THIRTIES', 'HIGHEST SCORE']
-                for c in int_cols:
-                    if c in player_stats.columns:
-                        player_stats[c] = pd.to_numeric(player_stats[c], errors='coerce').fillna(0).astype(int)
-        
-                # Nicely formatted header / metric cards
-                st.markdown("### Batting Statistics")
-                top_metric_mapping = {
-                    "Runs": ["RUNS", "RUNS "],
-                    "Innings": ["INNINGS", "MATCHES"],
-                    "Average": ["AVG", "AVERAGE"],
-                    "Strike Rate": ["SR", "STRIKE RATE"],
-                    "Highest Score": ["HIGHEST SCORE", "HS"],
-                    "50s": ["FIFTIES", "50S", "FIFTY"],
-                    "100s": ["HUNDREDS", "100S"],
-                }
-        
-                # collect values for display
-                found_top_cols = {}
-                for label, candidates in top_metric_mapping.items():
-                    col = find_col(player_stats, candidates)
-                    val = None
-                    if col is not None:
-                        try:
-                            val = player_stats.iloc[0][col]
-                        except Exception:
-                            val = player_stats[col].values[0] if len(player_stats[col].values) > 0 else None
-                        found_top_cols[label] = val
-        
-                # Display top metrics as columns
-                visible_metrics = [(k, v) for k, v in found_top_cols.items() if v is not None and (not (isinstance(v, float) and np.isnan(v)))]
-                if visible_metrics:
-                    cols = st.columns(len(visible_metrics))
-                    for (label, val), col in zip(visible_metrics, cols):
-                        if isinstance(val, (int, np.integer)):
-                            disp = f"{int(val)}"
-                        elif isinstance(val, (float, np.floating)) and not np.isnan(val):
-                            disp = f"{val:.2f}"
-                        else:
-                            disp = str(val)
-                        col.metric(label, disp)
-                else:
-                    st.write("Top metrics not available for this player.")
-        
-                # Detailed stats table (including Runs)
-                top_cols_used = [find_col(player_stats, cand) for cand in top_metric_mapping.values()]
-                top_cols_used = [c for c in top_cols_used if c is not None]
-                top_cols_used.remove('RUNS') if 'RUNS' in top_cols_used else None  # Keep Runs in detailed stats
-        
-                try:
-                    rest_series = player_stats.iloc[0].drop(labels=[c for c in top_cols_used if c != 'RUNS'], errors='ignore')
-                except Exception:
-                    rest_series = pd.Series(dtype=object)
-        
-                if not rest_series.empty:
-                    rest_df = rest_series.reset_index()
-                    rest_df.columns = ["Metric", "Value"]
-                    def fmt_val(x):
-                        if pd.isna(x):
-                            return ""
-                        if isinstance(x, (int, np.integer)):
-                            return int(x)
-                        if isinstance(x, (float, np.floating)):
-                            return round(x, 2)
-                        return x
-                    rest_df["Value"] = rest_df["Value"].apply(fmt_val)
-                    st.markdown("#### Detailed Statistics")
-                    st.dataframe(
-                        rest_df,
-                        use_container_width=True,
-                        column_config={"Metric": st.column_config.TextColumn(width="medium")},
-                        hide_index=True,
-                        # Light blue background for Detailed Stats table
-                        height=400,
-                        use_container_background_color="#E6F3FF"
-                    )
-                else:
-                    st.write("No additional per-player summary metrics available.")
-        
-                # Opponentwise Performance
-                bat_col = 'batsman' if 'batsman' in df.columns else ('bat' if 'bat' in df.columns else None)
-                if bat_col:
-                    opp_col = safe_get_col(df, ['team_bowl', 'team_bow', 'team_bowling'], default=None)
-                    if opp_col:
-                        opponents = sorted(df[df[bat_col] == player_name][opp_col].dropna().unique().tolist())
-                        all_opp = []
-                        for opp in opponents:
-                            temp = df[(df[bat_col] == player_name) & (df[opp_col] == opp)].copy()
-                            if temp.empty:
-                                continue
-                            temp_summary = cumulator(temp)
-                            if not temp_summary.empty:
-                                temp_summary['OPPONENT'] = opp
-                                all_opp.append(temp_summary)
-                        if all_opp:
-                            result_df = pd.concat(all_opp, ignore_index=True).drop(columns=['batsman', 'debut_year', 'final_year'], errors='ignore')
-                            result_df.columns = [str(col).upper().replace('_', ' ').replace('MIDDLE1', 'MIDDLE 1').replace('MIDDLE2', 'MIDDLE 2') for col in result_df.columns]
-                            for c in ['RUNS', 'HUNDREDS', 'FIFTIES', '30S', 'HIGHEST SCORE']:
-                                if c in result_df.columns:
-                                    result_df[c] = pd.to_numeric(result_df[c], errors='coerce').fillna(0).astype(int)
-                            result_df = round_up_floats(result_df)
-                            # Reorder to make OPPONENT first
-                            cols = ['OPPONENT'] + [col for col in result_df.columns if col != 'OPPONENT']
-                            result_df = result_df[cols]
-                            st.markdown("### Opponentwise Performance")
-                            st.dataframe(
-                                result_df,
-                                use_container_width=True,
-                                column_config={"OPPONENT": st.column_config.TextColumn(width="medium")},
-                                hide_index=True,
-                                # Light green background for Opponentwise table
-                                height=400,
-                                use_container_background_color="#E6FFE6"
-                            )
-        
-                    # Yearwise Performance
-                    if 'year' in df.columns:
-                        seasons = sorted(df[df[bat_col] == player_name]['year'].dropna().unique().tolist())
-                        all_seasons = []
-                        for season in seasons:
-                            temp = df[(df[bat_col] == player_name) & (df['year'] == season)].copy()
-                            if temp.empty:
-                                continue
-                            temp_summary = cumulator(temp)
-                            if not temp_summary.empty:
-                                temp_summary['YEAR'] = season
-                                all_seasons.append(temp_summary)
-                        if all_seasons:
-                            result_df = pd.concat(all_seasons, ignore_index=True).drop(columns=['batsman', 'debut_year', 'final_year'], errors='ignore')
-                            result_df.columns = [str(col).upper().replace('_', ' ').replace('MIDDLE1', 'MIDDLE 1').replace('MIDDLE2', 'MIDDLE 2') for col in result_df.columns]
-                            for c in ['RUNS', 'HUNDREDS', 'FIFTIES', '30S', 'HIGHEST SCORE']:
-                                if c in result_df.columns:
-                                    result_df[c] = pd.to_numeric(result_df[c], errors='coerce').fillna(0).astype(int)
-                            result_df = round_up_floats(result_df)
-                            # Reorder to make YEAR first
-                            cols = ['YEAR'] + [col for col in result_df.columns if col != 'YEAR']
-                            result_df = result_df[cols]
-                            st.markdown("### Yearwise Performance")
-                            st.dataframe(
-                                result_df,
-                                use_container_width=True,
-                                column_config={"YEAR": st.column_config.TextColumn(width="medium")},
-                                hide_index=True,
-                                # Light yellow background for Yearwise table
-                                height=400,
-                                use_container_background_color="#FFF7E6"
-                            )
-        
-                    # Inningwise Performance
-                    inning_col = 'inns' if 'inns' in df.columns else ('inning' if 'inning' in df.columns else None)
-                    if inning_col:
-                        innings_list = []
-                        for inn in sorted(df[inning_col].dropna().unique()):
-                            temp = df[(df[bat_col] == player_name) & (df[inning_col] == inn)].copy()
-                            if temp.empty:
-                                continue
-                            temp_summary = cumulator(temp)
-                            if not temp_summary.empty:
-                                temp_summary['INNING'] = inn
-                                innings_list.append(temp_summary)
-                        if all_seasons:
-                            result_df = pd.concat(innings_list, ignore_index=True).drop(columns=['batsman', 'debut_year', 'final_year'], errors='ignore')
-                            result_df.columns = [str(col).upper().replace('_', ' ').replace('MIDDLE1', 'MIDDLE 1').replace('MIDDLE2', 'MIDDLE 2') for col in result_df.columns]
-                            for c in ['RUNS', 'HUNDREDS', 'FIFTIES', '30S', 'HIGHEST SCORE']:
-                                if c in result_df.columns:
-                                    result_df[c] = pd.to_numeric(result_df[c], errors='coerce').fillna(0).astype(int)
-                            result_df = round_up_floats(result_df)
-                            # Reorder to make INNING first
-                            cols = ['INNING'] + [col for col in result_df.columns if col != 'INNING']
-                            result_df = result_df[cols]
-                            st.markdown("### Inningwise Performance")
-                            st.dataframe(
-                                result_df,
-                                use_container_width=True,
-                                column_config={"INNING": st.column_config.TextColumn(width="medium")},
-                                hide_index=True,
-                                # Light purple background for Inningwise table
-                                height=400,
-                                use_container_background_color="#F0E6FF"
-                            )
+        if option=='Batting:
+            def batting_stats_display(df, idf, player_name, option):
+                if option == "Batting":
+                    player_stats = idf[idf['batsman'] == player_name]
+                    if player_stats is None or player_stats.empty:
+                        st.warning(f"No data available for {player_name}.")
+                        st.stop()
+            
+                    # cleanup & formatting
+                    player_stats = player_stats.drop(columns=['final_year'], errors='ignore')
+                    player_stats.columns = [str(col).upper().replace('_', ' ').replace('MIDDLE1', 'MIDDLE 1').replace('MIDDLE2', 'MIDDLE 2') for col in player_stats.columns]
+                    player_stats = round_up_floats(player_stats)
+            
+                    int_cols = ['RUNS', 'HUNDREDS', 'FIFTIES', 'THIRTIES', 'HIGHEST SCORE']
+                    for c in int_cols:
+                        if c in player_stats.columns:
+                            player_stats[c] = pd.to_numeric(player_stats[c], errors='coerce').fillna(0).astype(int)
+            
+                    # Nicely formatted header / metric cards
+                    st.markdown("### Batting Statistics")
+                    top_metric_mapping = {
+                        "Runs": ["RUNS", "RUNS "],
+                        "Innings": ["INNINGS", "MATCHES"],
+                        "Average": ["AVG", "AVERAGE"],
+                        "Strike Rate": ["SR", "STRIKE RATE"],
+                        "Highest Score": ["HIGHEST SCORE", "HS"],
+                        "50s": ["FIFTIES", "50S", "FIFTY"],
+                        "100s": ["HUNDREDS", "100S"],
+                    }
+            
+                    # collect values for display
+                    found_top_cols = {}
+                    for label, candidates in top_metric_mapping.items():
+                        col = find_col(player_stats, candidates)
+                        val = None
+                        if col is not None:
+                            try:
+                                val = player_stats.iloc[0][col]
+                            except Exception:
+                                val = player_stats[col].values[0] if len(player_stats[col].values) > 0 else None
+                            found_top_cols[label] = val
+            
+                    # Display top metrics as columns
+                    visible_metrics = [(k, v) for k, v in found_top_cols.items() if v is not None and (not (isinstance(v, float) and np.isnan(v)))]
+                    if visible_metrics:
+                        cols = st.columns(len(visible_metrics))
+                        for (label, val), col in zip(visible_metrics, cols):
+                            if isinstance(val, (int, np.integer)):
+                                disp = f"{int(val)}"
+                            elif isinstance(val, (float, np.floating)) and not np.isnan(val):
+                                disp = f"{val:.2f}"
+                            else:
+                                disp = str(val)
+                            col.metric(label, disp)
+                    else:
+                        st.write("Top metrics not available for this player.")
+            
+                    # Detailed stats table (including Runs)
+                    top_cols_used = [find_col(player_stats, cand) for cand in top_metric_mapping.values()]
+                    top_cols_used = [c for c in top_cols_used if c is not None]
+                    top_cols_used.remove('RUNS') if 'RUNS' in top_cols_used else None  # Keep Runs in detailed stats
+            
+                    try:
+                        rest_series = player_stats.iloc[0].drop(labels=[c for c in top_cols_used if c != 'RUNS'], errors='ignore')
+                    except Exception:
+                        rest_series = pd.Series(dtype=object)
+            
+                    if not rest_series.empty:
+                        rest_df = rest_series.reset_index()
+                        rest_df.columns = ["Metric", "Value"]
+                        def fmt_val(x):
+                            if pd.isna(x):
+                                return ""
+                            if isinstance(x, (int, np.integer)):
+                                return int(x)
+                            if isinstance(x, (float, np.floating)):
+                                return round(x, 2)
+                            return x
+                        rest_df["Value"] = rest_df["Value"].apply(fmt_val)
+                        st.markdown("#### Detailed Statistics")
+                        st.dataframe(
+                            rest_df,
+                            use_container_width=True,
+                            column_config={"Metric": st.column_config.TextColumn(width="medium")},
+                            hide_index=True,
+                            # Light blue background for Detailed Stats table
+                            height=400,
+                            use_container_background_color="#E6F3FF"
+                        )
+                    else:
+                        st.write("No additional per-player summary metrics available.")
+            
+                    # Opponentwise Performance
+                    bat_col = 'batsman' if 'batsman' in df.columns else ('bat' if 'bat' in df.columns else None)
+                    if bat_col:
+                        opp_col = safe_get_col(df, ['team_bowl', 'team_bow', 'team_bowling'], default=None)
+                        if opp_col:
+                            opponents = sorted(df[df[bat_col] == player_name][opp_col].dropna().unique().tolist())
+                            all_opp = []
+                            for opp in opponents:
+                                temp = df[(df[bat_col] == player_name) & (df[opp_col] == opp)].copy()
+                                if temp.empty:
+                                    continue
+                                temp_summary = cumulator(temp)
+                                if not temp_summary.empty:
+                                    temp_summary['OPPONENT'] = opp
+                                    all_opp.append(temp_summary)
+                            if all_opp:
+                                result_df = pd.concat(all_opp, ignore_index=True).drop(columns=['batsman', 'debut_year', 'final_year'], errors='ignore')
+                                result_df.columns = [str(col).upper().replace('_', ' ').replace('MIDDLE1', 'MIDDLE 1').replace('MIDDLE2', 'MIDDLE 2') for col in result_df.columns]
+                                for c in ['RUNS', 'HUNDREDS', 'FIFTIES', '30S', 'HIGHEST SCORE']:
+                                    if c in result_df.columns:
+                                        result_df[c] = pd.to_numeric(result_df[c], errors='coerce').fillna(0).astype(int)
+                                result_df = round_up_floats(result_df)
+                                # Reorder to make OPPONENT first
+                                cols = ['OPPONENT'] + [col for col in result_df.columns if col != 'OPPONENT']
+                                result_df = result_df[cols]
+                                st.markdown("### Opponentwise Performance")
+                                st.dataframe(
+                                    result_df,
+                                    use_container_width=True,
+                                    column_config={"OPPONENT": st.column_config.TextColumn(width="medium")},
+                                    hide_index=True,
+                                    # Light green background for Opponentwise table
+                                    height=400,
+                                    use_container_background_color="#E6FFE6"
+                                )
+            
+                        # Yearwise Performance
+                        if 'year' in df.columns:
+                            seasons = sorted(df[df[bat_col] == player_name]['year'].dropna().unique().tolist())
+                            all_seasons = []
+                            for season in seasons:
+                                temp = df[(df[bat_col] == player_name) & (df['year'] == season)].copy()
+                                if temp.empty:
+                                    continue
+                                temp_summary = cumulator(temp)
+                                if not temp_summary.empty:
+                                    temp_summary['YEAR'] = season
+                                    all_seasons.append(temp_summary)
+                            if all_seasons:
+                                result_df = pd.concat(all_seasons, ignore_index=True).drop(columns=['batsman', 'debut_year', 'final_year'], errors='ignore')
+                                result_df.columns = [str(col).upper().replace('_', ' ').replace('MIDDLE1', 'MIDDLE 1').replace('MIDDLE2', 'MIDDLE 2') for col in result_df.columns]
+                                for c in ['RUNS', 'HUNDREDS', 'FIFTIES', '30S', 'HIGHEST SCORE']:
+                                    if c in result_df.columns:
+                                        result_df[c] = pd.to_numeric(result_df[c], errors='coerce').fillna(0).astype(int)
+                                result_df = round_up_floats(result_df)
+                                # Reorder to make YEAR first
+                                cols = ['YEAR'] + [col for col in result_df.columns if col != 'YEAR']
+                                result_df = result_df[cols]
+                                st.markdown("### Yearwise Performance")
+                                st.dataframe(
+                                    result_df,
+                                    use_container_width=True,
+                                    column_config={"YEAR": st.column_config.TextColumn(width="medium")},
+                                    hide_index=True,
+                                    # Light yellow background for Yearwise table
+                                    height=400,
+                                    use_container_background_color="#FFF7E6"
+                                )
+            
+                        # Inningwise Performance
+                        inning_col = 'inns' if 'inns' in df.columns else ('inning' if 'inning' in df.columns else None)
+                        if inning_col:
+                            innings_list = []
+                            for inn in sorted(df[inning_col].dropna().unique()):
+                                temp = df[(df[bat_col] == player_name) & (df[inning_col] == inn)].copy()
+                                if temp.empty:
+                                    continue
+                                temp_summary = cumulator(temp)
+                                if not temp_summary.empty:
+                                    temp_summary['INNING'] = inn
+                                    innings_list.append(temp_summary)
+                            if all_seasons:
+                                result_df = pd.concat(innings_list, ignore_index=True).drop(columns=['batsman', 'debut_year', 'final_year'], errors='ignore')
+                                result_df.columns = [str(col).upper().replace('_', ' ').replace('MIDDLE1', 'MIDDLE 1').replace('MIDDLE2', 'MIDDLE 2') for col in result_df.columns]
+                                for c in ['RUNS', 'HUNDREDS', 'FIFTIES', '30S', 'HIGHEST SCORE']:
+                                    if c in result_df.columns:
+                                        result_df[c] = pd.to_numeric(result_df[c], errors='coerce').fillna(0).astype(int)
+                                result_df = round_up_floats(result_df)
+                                # Reorder to make INNING first
+                                cols = ['INNING'] + [col for col in result_df.columns if col != 'INNING']
+                                result_df = result_df[cols]
+                                st.markdown("### Inningwise Performance")
+                                st.dataframe(
+                                    result_df,
+                                    use_container_width=True,
+                                    column_config={"INNING": st.column_config.TextColumn(width="medium")},
+                                    hide_index=True,
+                                    # Light purple background for Inningwise table
+                                    height=400,
+                                    use_container_background_color="#F0E6FF"
+                                )
 
         elif option == "Bowling":
             st.info("🎯 Bowling module will be integrated after validation of bowl_rec().")
