@@ -1648,7 +1648,7 @@ elif sidebar_option == "Matchup Analysis":
 
     st.header("Matchup Analysis")
 
-    # Defensive helper fallbacks (use your existing ones if present)
+    # ---------- Defensive helper fallbacks ----------
     try:
         as_dataframe
     except NameError:
@@ -1663,7 +1663,7 @@ elif sidebar_option == "Matchup Analysis":
 
     bdf = as_dataframe(df)
 
-    # Detect column names in your data
+    # ---------- Detect relevant columns ----------
     batter_col = safe_get_col(bdf, ['bat', 'batsman'], default=None)
     bowler_col = safe_get_col(bdf, ['bowl', 'bowler'], default=None)
     match_col  = safe_get_col(bdf, ['p_match', 'match_id'], default=None)
@@ -1675,199 +1675,212 @@ elif sidebar_option == "Matchup Analysis":
         st.error("Dataframe must contain batter and bowler columns (e.g. 'bat' and 'bowl').")
         st.stop()
 
-    # Build unique player lists (filter out nulls and '0')
+    # ---------- Build player lists ----------
     unique_batters = sorted([x for x in pd.unique(bdf[batter_col].dropna()) if str(x).strip() not in ("", "0")])
     unique_bowlers  = sorted([x for x in pd.unique(bdf[bowler_col].dropna())  if str(x).strip() not in ("", "0")])
 
     if not unique_batters or not unique_bowlers:
-        st.warning("No batters or bowlers found in the dataset.")
+        st.warning("No batters or bowlers found in dataset.")
         st.stop()
 
-    # Player selectors
+    # ---------- Controls ----------
     batter_name = st.selectbox("Select a Batter", unique_batters, index=0)
     bowler_name = st.selectbox("Select a Bowler", unique_bowlers, index=0)
-
-    # Grouping option
     grouping_option = st.selectbox("Group By", ["Year", "Match", "Venue", "Inning"])
 
-    # Raw matchup rows for download/sanity
+    # Raw matchup rows (for download)
     matchup_df = bdf[(bdf[batter_col] == batter_name) & (bdf[bowler_col] == bowler_name)].copy()
 
     if matchup_df.empty:
         st.warning("No data available for the selected matchup.")
-    else:
-        # Normalize numeric fields defensively
-        for col in ['batsman_runs', 'batruns', 'score', 'bowlruns', 'total_runs']:
-            if col in matchup_df.columns:
+        st.stop()
+
+    # Normalize numeric columns in the raw rows (defensive)
+    for col in ['batsman_runs', 'batruns', 'score', 'bowlruns', 'total_runs', 'byes', 'legbyes']:
+        if col in matchup_df.columns:
+            matchup_df[col] = pd.to_numeric(matchup_df[col], errors='coerce')
+
+    # Download raw match-up CSV (raw rows)
+    st.download_button(
+        label="Download raw matchup rows (CSV)",
+        data=matchup_df.to_csv(index=False),
+        file_name=f"{str(batter_name)}_vs_{str(bowler_name)}_matchup.csv",
+        mime="text/csv"
+    )
+
+    # ---------- Type enforcement helpers ----------
+    def enforce_integer_counts(df_display: pd.DataFrame) -> pd.DataFrame:
+        """
+        Coerce count-like columns to int when present.
+        This checks columns case-insensitively after normalizing names to UPPER + spaces.
+        """
+        df = df_display.copy()
+        # normalize column labels temporarily for checking but keep original names
+        norm_map = {col: str(col).upper().replace('_', ' ') for col in df.columns}
+        # columns to coerce (case-insensitive match against normalized names)
+        int_targets = {'INNINGS','INNING','RUNS','BALLS','WKTS','DISMISSALS','MATCHES','MATCH ID'}
+        for orig_col, norm_col in norm_map.items():
+            if norm_col in int_targets:
+                # coerce to numeric -> fillna(0) -> convert to int safely
                 try:
-                    matchup_df[col] = pd.to_numeric(matchup_df[col], errors='coerce')
+                    df[orig_col] = pd.to_numeric(df[orig_col], errors='coerce').fillna(0).astype(int)
                 except Exception:
-                    pass
+                    # fallback: coerce and round then int
+                    df[orig_col] = pd.to_numeric(df[orig_col], errors='coerce').fillna(0).round(0).astype(int)
+        return df
 
-        # Download raw matchup CSV
-        csv = matchup_df.to_csv(index=False)
-        st.download_button(
-            label="Download raw matchup rows (CSV)",
-            data=csv,
-            file_name=f"{str(batter_name)}_vs_{str(bowler_name)}_matchup.csv",
-            mime="text/csv"
-        )
+    def round_other_numeric_cols(df_display: pd.DataFrame) -> pd.DataFrame:
+        """
+        Round all numeric columns to 2 decimals except integer-count columns above.
+        """
+        df = df_display.copy()
+        # build set of normalized int column names
+        norm_map = {col: str(col).upper().replace('_', ' ') for col in df.columns}
+        int_targets = {'INNINGS','INNING','RUNS','BALLS','WKTS','DISMISSALS','MATCHES','MATCH ID'}
+        # list columns to exclude from rounding (orig names)
+        exclude_cols = [orig for orig, norm in norm_map.items() if norm in int_targets]
+        # round any numeric dtype columns not in exclude list
+        for col in df.select_dtypes(include=['number']).columns:
+            if col in exclude_cols:
+                continue
+            try:
+                df[col] = df[col].round(2)
+            except Exception:
+                pass
+        return df
 
-        # Helper: convert column names to display form (UPPER + spaces)
-        def normalize_display_columns(df_in):
-            df = df_in.copy()
-            df.columns = [str(col).upper().replace('_', ' ') for col in df.columns]
-            return df
+    def normalize_display_columns(df_display: pd.DataFrame) -> pd.DataFrame:
+        df = df_display.copy()
+        df.columns = [str(col).upper().replace('_', ' ') for col in df.columns]
+        # optionally convert MIDDLE1/MIDDLE2 -> MIDDLE 1 / MIDDLE 2 (if present)
+        df.columns = [c.replace('MIDDLE1', 'MIDDLE 1').replace('MIDDLE2', 'MIDDLE 2') for c in df.columns]
+        return df
 
-        # Helper: coerce specific count columns to int where present
-        def coerce_int_counts(df_out):
-            int_candidates = ['INNINGS', 'INNING', 'RUNS', 'BALLS', 'WKTS', 'DISMISSALS', 'MATCHES', 'MATCH ID']
-            for ic in int_candidates:
-                if ic in df_out.columns:
-                    df_out[ic] = pd.to_numeric(df_out[ic], errors='coerce').fillna(0).astype(int)
-            return df_out
+    # ---------- Central finalize function ----------
+    def finalize_and_present(df_list, primary_col_label, title, header_color="#efe6ff"):
+        """
+        df_list: list of DataFrames (raw output from cumulator / bowlerstat)
+        primary_col_label: string (already human-friendly, like 'YEAR' or 'VENUE' or 'MATCH ID' or 'INNING')
+        """
+        if not df_list:
+            st.info(f"No {title.lower()} data available for this matchup.")
+            return
 
-        # Helper: round numeric floats to 2 decimals for presentation (but keep integer cols intact)
-        def round_numeric_cols(df_out):
-            # Identify numeric columns (exclude integer-like ones we already coerced)
-            numeric_cols = df_out.select_dtypes(include=['number']).columns.tolist()
-            # Exclude integer count columns
-            int_candidates = ['INNINGS', 'INNING', 'RUNS', 'BALLS', 'WKTS', 'DISMISSALS', 'MATCHES', 'MATCH ID']
-            numeric_cols = [c for c in numeric_cols if c not in int_candidates]
-            for nc in numeric_cols:
-                try:
-                    df_out[nc] = df_out[nc].round(2)
-                except Exception:
-                    pass
-            return df_out
+        out = pd.concat(df_list, ignore_index=True).drop(columns=[batter_col, bowler_col], errors='ignore')
+        # first enforce integer counts (original column names)
+        out = enforce_integer_counts(out)
+        # then round other numeric cols
+        out = round_other_numeric_cols(out)
+        # normalize column names for display
+        out = normalize_display_columns(out)
 
-        # Finalize and display helper
-        def finalize_and_show(df_list, primary_col_name, title, header_color="#efe6ff"):
-            if not df_list:
-                st.info(f"No {title.lower()} data available for this matchup.")
-                return
+        # ensure primary column is first
+        primary_norm = str(primary_col_label).upper().replace('_', ' ')
+        cols = out.columns.tolist()
+        if primary_norm in cols:
+            new_order = [primary_norm] + [c for c in cols if c != primary_norm]
+            out = out[new_order]
 
-            out = pd.concat(df_list, ignore_index=True).drop(columns=[batter_col, bowler_col], errors='ignore')
-            # Normalize display column names
-            out = normalize_display_columns(out)
+        # Basic light header styling
+        table_styles = [
+            {"selector": "thead th", "props": [("background-color", header_color), ("color", "#000"), ("font-weight", "600")]},
+            {"selector": "tbody tr:nth-child(odd)", "props": [("background-color", "#ffffff")]},
+            {"selector": "tbody tr:nth-child(even)", "props": [("background-color", "#f7f7fb")]},
+        ]
 
-            # Ensure primary column name is uppercase & spaced like our normalized columns
-            primary_col_name_norm = str(primary_col_name).upper().replace('_', ' ')
+        st.markdown(f"### {title}")
+        st.dataframe(out.style.set_table_styles(table_styles), use_container_width=True)
 
-            # Coerce counts to int
-            out = coerce_int_counts(out)
-            # Round other numeric columns to 2 decimals
-            out = round_numeric_cols(out)
+    # ---------- Prepare grouped outputs ----------
+    # Note: cumulator must exist and return DataFrame rows similar to your existing pipeline.
+    if not have_cumulator:
+        st.error("cumulator() function not found in environment — aggregated summaries cannot be built.")
+        st.stop()
 
-            # Put primary column first if present
-            cols = out.columns.tolist()
-            if primary_col_name_norm in cols:
-                new_order = [primary_col_name_norm] + [c for c in cols if c != primary_col_name_norm]
-                out = out[new_order]
-
-            # Basic light header styling
-            table_styles = [
-                {"selector": "thead th", "props": [("background-color", header_color), ("color", "#000"), ("font-weight", "600")]},
-                {"selector": "tbody tr:nth-child(odd)", "props": [("background-color", "#ffffff")]},
-                {"selector": "tbody tr:nth-child(even)", "props": [("background-color", "#f7f7fb")]},
-            ]
-            st.markdown(f"### {title}")
-            st.dataframe(out.style.set_table_styles(table_styles), use_container_width=True)
-
-        # -------------------
-        # Year grouping
-        # -------------------
-        if grouping_option == "Year":
-            if year_col is None:
-                st.info("Year/season column not detected in dataset.")
-            else:
-                tdf = matchup_df.copy()
-                seasons = sorted(tdf[year_col].dropna().unique().tolist())
-                all_seasons = []
-                for s in seasons:
-                    temp = tdf[tdf[year_col] == s].copy()
-                    if temp.empty:
-                        continue
-                    temp_summary = cumulator(temp)  # must return summary rows
-                    temp_summary = as_dataframe(temp_summary)
-                    if temp_summary.empty:
-                        continue
-                    temp_summary.insert(0, 'YEAR', s)
-                    all_seasons.append(temp_summary)
-
-                finalize_and_show(all_seasons, 'YEAR', "Yearwise Performance", header_color="#efe6ff")
-
-        # -------------------
-        # Match grouping
-        # -------------------
-        elif grouping_option == "Match":
-            if match_col is None:
-                st.info("Match ID column not detected in dataset (expected 'p_match' or 'match_id').")
-            else:
-                tdf = matchup_df.copy()
-                match_ids = sorted(tdf[match_col].dropna().unique().tolist())
-                all_matches = []
-                for m in match_ids:
-                    temp = tdf[tdf[match_col] == m].copy()
-                    if temp.empty:
-                        continue
-                    temp_summary = cumulator(temp)
-                    temp_summary = as_dataframe(temp_summary)
-                    if temp_summary.empty:
-                        continue
-                    temp_summary.insert(0, 'MATCH ID', m)
-                    all_matches.append(temp_summary)
-
-                finalize_and_show(all_matches, 'MATCH ID', "Matchwise Performance", header_color="#e6f7ff")
-
-        # -------------------
-        # Venue grouping
-        # -------------------
-        elif grouping_option == "Venue":
-            if venue_col is None:
-                st.info("Venue/ground column not detected in dataset.")
-            else:
-                tdf = matchup_df.copy()
-                venues = sorted(tdf[venue_col].dropna().unique().tolist())
-                all_venues = []
-                for v in venues:
-                    temp = tdf[tdf[venue_col] == v].copy()
-                    if temp.empty:
-                        continue
-                    temp_summary = cumulator(temp)
-                    temp_summary = as_dataframe(temp_summary)
-                    if temp_summary.empty:
-                        continue
-                    temp_summary.insert(0, 'VENUE', v)
-                    all_venues.append(temp_summary)
-
-                finalize_and_show(all_venues, 'VENUE', "Venuewise Performance", header_color="#e6f7ff")
-
-        # -------------------
-        # Inning grouping
-        # -------------------
-        elif grouping_option == "Inning":
-            if inning_col is None:
-                st.info("Inning column not detected in dataset (expected 'inns' or 'inning').")
-            else:
-                tdf = matchup_df.copy()
-                innings = sorted(tdf[inning_col].dropna().unique().tolist())
-                all_inns = []
-                for inn in innings:
-                    temp = tdf[tdf[inning_col] == inn].copy()
-                    if temp.empty:
-                        continue
-                    temp_summary = cumulator(temp)
-                    temp_summary = as_dataframe(temp_summary)
-                    if temp_summary.empty:
-                        continue
-                    temp_summary.insert(0, 'INNING', inn)
-                    all_inns.append(temp_summary)
-
-                finalize_and_show(all_inns, 'INNING', "Inningwise Performance", header_color="#e6f7ff")
-
+    # YEAR grouping
+    if grouping_option == "Year":
+        if year_col is None:
+            st.info("Year/season column not present in dataset.")
         else:
-            st.info("Unknown grouping option selected.")
+            tdf = matchup_df.copy()
+            seasons = sorted(tdf[year_col].dropna().unique().tolist())
+            all_seasons = []
+            for s in seasons:
+                tmp = tdf[tdf[year_col] == s].copy()
+                if tmp.empty:
+                    continue
+                summary = cumulator(tmp)
+                summary = as_dataframe(summary)
+                if summary.empty:
+                    continue
+                # ensure YEAR first column (use original 'YEAR' label so our finalizer recognizes it)
+                summary.insert(0, 'YEAR', s)
+                all_seasons.append(summary)
+            # present (YEAR will be coerced to int if applicable and others rounded)
+            finalize_and_present(all_seasons, 'YEAR', "Yearwise Performance", header_color="#efe6ff")
+
+    # MATCH grouping
+    elif grouping_option == "Match":
+        if match_col is None:
+            st.info("Match ID / p_match not present in dataset.")
+        else:
+            tdf = matchup_df.copy()
+            match_ids = sorted(tdf[match_col].dropna().unique().tolist())
+            all_matches = []
+            for m in match_ids:
+                tmp = tdf[tdf[match_col] == m].copy()
+                if tmp.empty:
+                    continue
+                summary = cumulator(tmp)
+                summary = as_dataframe(summary)
+                if summary.empty:
+                    continue
+                summary.insert(0, 'MATCH ID', m)
+                all_matches.append(summary)
+            finalize_and_present(all_matches, 'MATCH ID', "Matchwise Performance", header_color="#e6f7ff")
+
+    # VENUE grouping
+    elif grouping_option == "Venue":
+        if venue_col is None:
+            st.info("Venue/ground column not present in dataset.")
+        else:
+            tdf = matchup_df.copy()
+            venues = sorted(tdf[venue_col].dropna().unique().tolist())
+            all_venues = []
+            for v in venues:
+                tmp = tdf[tdf[venue_col] == v].copy()
+                if tmp.empty:
+                    continue
+                summary = cumulator(tmp)
+                summary = as_dataframe(summary)
+                if summary.empty:
+                    continue
+                summary.insert(0, 'VENUE', v)
+                all_venues.append(summary)
+            finalize_and_present(all_venues, 'VENUE', "Venuewise Performance", header_color="#e6f7ff")
+
+    # INNING grouping
+    elif grouping_option == "Inning":
+        if inning_col is None:
+            st.info("Inning column ('inns'/'inning') not present in dataset.")
+        else:
+            tdf = matchup_df.copy()
+            innings = sorted(tdf[inning_col].dropna().unique().tolist())
+            all_inns = []
+            for inn in innings:
+                tmp = tdf[tdf[inning_col] == inn].copy()
+                if tmp.empty:
+                    continue
+                summary = cumulator(tmp)
+                summary = as_dataframe(summary)
+                if summary.empty:
+                    continue
+                summary.insert(0, 'INNING', inn)
+                all_inns.append(summary)
+            finalize_and_present(all_inns, 'INNING', "Inningwise Performance", header_color="#e6f7ff")
+
+    else:
+        st.info("Unknown grouping option selected.")
 
 
 
