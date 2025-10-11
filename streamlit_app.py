@@ -75,7 +75,7 @@ def avg(runs, dismissals, innings):
         return runs / innings
     return np.nan
 
-def categorize_phase(over_val)
+def categorize_phase(over_val):
     try:
         o = float(over_val)
     except Exception:
