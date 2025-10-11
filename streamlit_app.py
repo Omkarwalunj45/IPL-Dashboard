@@ -1820,6 +1820,7 @@ elif sidebar_option == "Matchup Analysis":
                         continue
                     # FORMAT BEFORE ADDING TO LIST
                     temp_summary = format_summary_df(temp_summary)
+                    temp_summary=round_off_floats(temp_summary)
                     temp_summary.insert(0, 'year', s)
                     all_seasons.append(temp_summary)
 
