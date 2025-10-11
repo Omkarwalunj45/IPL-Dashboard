@@ -841,7 +841,7 @@ def bowlerstat(df: pd.DataFrame) -> pd.DataFrame:
 # -----------------------
 @st.cache_data
 def build_idf(df_local):
-    return Custom(df_local)
+    return cumulator(df_local)
 
 
 sidebar_option = st.sidebar.radio(
