@@ -1644,12 +1644,11 @@ if sidebar_option == "Player Profile":
         else:
             st.info("No inningwise bowling summary available for this player.")
 
-
 elif sidebar_option == "Matchup Analysis":
 
     st.header("Matchup Analysis")
 
-    # Defensive helpers (use existing ones if present)
+    # Defensive helper fallbacks (use your existing ones if present)
     try:
         as_dataframe
     except NameError:
@@ -1661,21 +1660,37 @@ elif sidebar_option == "Matchup Analysis":
             else:
                 return pd.DataFrame(x)
 
-    bdf = as_dataframe(df)  # work on a copy
+    try:
+        safe_get_col
+    except NameError:
+        def safe_get_col(df_local, candidates, default=None):
+            for c in candidates:
+                if c in df_local.columns:
+                    return c
+            return default
+
+    # Ensure df exists
+    try:
+        df
+    except NameError:
+        st.error("Raw ball-by-ball DataFrame 'df' not found. Load data before using Matchup Analysis.")
+        st.stop()
+
+    bdf = as_dataframe(df)
 
     # Detect column names in your data
     batter_col = safe_get_col(bdf, ['bat', 'batsman'], default=None)
     bowler_col = safe_get_col(bdf, ['bowl', 'bowler'], default=None)
-    match_col = safe_get_col(bdf, ['p_match', 'match_id'], default=None)
-    year_col = safe_get_col(bdf, ['season', 'year'], default=None)
+    match_col  = safe_get_col(bdf, ['p_match', 'match_id'], default=None)
+    year_col   = safe_get_col(bdf, ['season', 'year'], default=None)
     inning_col = safe_get_col(bdf, ['inns', 'inning'], default=None)
-    venue_col = safe_get_col(bdf, ['ground', 'venue', 'stadium', 'ground_name'], default=None)
+    venue_col  = safe_get_col(bdf, ['ground', 'venue', 'stadium', 'ground_name'], default=None)
 
     if batter_col is None or bowler_col is None:
         st.error("Dataframe must contain batter and bowler columns (e.g. 'bat' and 'bowl').")
         st.stop()
 
-    # Build unique player lists (filtering out nulls/"0")
+    # Build unique player lists (filter out nulls and '0')
     unique_batters = sorted([x for x in pd.unique(bdf[batter_col].dropna()) if str(x).strip() not in ("", "0")])
     unique_bowlers  = sorted([x for x in pd.unique(bdf[bowler_col].dropna())  if str(x).strip() not in ("", "0")])
 
@@ -1690,13 +1705,13 @@ elif sidebar_option == "Matchup Analysis":
     # Grouping option
     grouping_option = st.selectbox("Group By", ["Year", "Match", "Venue", "Inning"])
 
-    # Raw matchup rows (for download and sanity)
+    # Raw matchup rows for download/sanity
     matchup_df = bdf[(bdf[batter_col] == batter_name) & (bdf[bowler_col] == bowler_name)].copy()
 
     if matchup_df.empty:
         st.warning("No data available for the selected matchup.")
     else:
-        # Normalize numeric fields if present (defensive)
+        # Normalize numeric fields defensively
         for col in ['batsman_runs', 'batruns', 'score', 'bowlruns', 'total_runs']:
             if col in matchup_df.columns:
                 try:
@@ -1704,7 +1719,7 @@ elif sidebar_option == "Matchup Analysis":
                 except Exception:
                     pass
 
-        # Download button for raw matchup rows
+        # Download raw matchup CSV
         csv = matchup_df.to_csv(index=False)
         st.download_button(
             label="Download raw matchup rows (CSV)",
@@ -1713,32 +1728,59 @@ elif sidebar_option == "Matchup Analysis":
             mime="text/csv"
         )
 
-        # Helper to drop and format result before display
+        # Helper: convert column names to display form (UPPER + spaces)
+        def normalize_display_columns(df_in):
+            df = df_in.copy()
+            df.columns = [str(col).upper().replace('_', ' ') for col in df.columns]
+            return df
+
+        # Helper: coerce specific count columns to int where present
+        def coerce_int_counts(df_out):
+            int_candidates = ['INNINGS', 'INNING', 'RUNS', 'BALLS', 'WKTS', 'DISMISSALS', 'MATCHES', 'MATCH ID']
+            for ic in int_candidates:
+                if ic in df_out.columns:
+                    df_out[ic] = pd.to_numeric(df_out[ic], errors='coerce').fillna(0).astype(int)
+            return df_out
+
+        # Helper: round numeric floats to 2 decimals for presentation (but keep integer cols intact)
+        def round_numeric_cols(df_out):
+            # Identify numeric columns (exclude integer-like ones we already coerced)
+            numeric_cols = df_out.select_dtypes(include=['number']).columns.tolist()
+            # Exclude integer count columns
+            int_candidates = ['INNINGS', 'INNING', 'RUNS', 'BALLS', 'WKTS', 'DISMISSALS', 'MATCHES', 'MATCH ID']
+            numeric_cols = [c for c in numeric_cols if c not in int_candidates]
+            for nc in numeric_cols:
+                try:
+                    df_out[nc] = df_out[nc].round(2)
+                except Exception:
+                    pass
+            return df_out
+
+        # Finalize and display helper
         def finalize_and_show(df_list, primary_col_name, title, header_color="#efe6ff"):
-            # df_list: list of DataFrames already prepared (each with primary_col_name present)
             if not df_list:
                 st.info(f"No {title.lower()} data available for this matchup.")
                 return
 
             out = pd.concat(df_list, ignore_index=True).drop(columns=[batter_col, bowler_col], errors='ignore')
-            # numeric casts for common columns
-            for c in ['runs', 'dismissals', 'balls', 'wkts', 'overs']:
-                if c in out.columns:
-                    out[c] = pd.to_numeric(out[c], errors='coerce').fillna(0)
-            out.columns = [col.upper().replace('_', ' ') for col in out.columns]
+            # Normalize display column names
+            out = normalize_display_columns(out)
 
-            # Ensure primary column is first (already inserted by callers)
+            # Ensure primary column name is uppercase & spaced like our normalized columns
+            primary_col_name_norm = str(primary_col_name).upper().replace('_', ' ')
+
+            # Coerce counts to int
+            out = coerce_int_counts(out)
+            # Round other numeric columns to 2 decimals
+            out = round_numeric_cols(out)
+
+            # Put primary column first if present
             cols = out.columns.tolist()
-            if primary_col_name not in cols:
-                # if not present, just show dataframe
-                st.dataframe(out, use_container_width=True)
-                return
+            if primary_col_name_norm in cols:
+                new_order = [primary_col_name_norm] + [c for c in cols if c != primary_col_name_norm]
+                out = out[new_order]
 
-            # reorder putting primary_col_name first
-            new_order = [primary_col_name] + [c for c in cols if c != primary_col_name]
-            out = out[new_order]
-
-            # basic light header color styling
+            # Basic light header styling
             table_styles = [
                 {"selector": "thead th", "props": [("background-color", header_color), ("color", "#000"), ("font-weight", "600")]},
                 {"selector": "tbody tr:nth-child(odd)", "props": [("background-color", "#ffffff")]},
@@ -1761,14 +1803,13 @@ elif sidebar_option == "Matchup Analysis":
                     temp = tdf[tdf[year_col] == s].copy()
                     if temp.empty:
                         continue
-                    temp_summary = cumulator(temp)  # expects to return per-player summary rows
+                    temp_summary = cumulator(temp)  # must return summary rows
                     temp_summary = as_dataframe(temp_summary)
                     if temp_summary.empty:
                         continue
                     temp_summary.insert(0, 'YEAR', s)
                     all_seasons.append(temp_summary)
 
-                # show results with YEAR as first column
                 finalize_and_show(all_seasons, 'YEAR', "Yearwise Performance", header_color="#efe6ff")
 
         # -------------------
