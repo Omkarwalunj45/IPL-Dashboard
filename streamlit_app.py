@@ -83,116 +83,27 @@ def categorize_phase(over_val):
     if o <= 6:
         return "Powerplay"
     if 6 < o <= 11:
-        return "Middle1"
+        return "Middle 1"
     if 11 < o <= 16:
-        return "Middle2"
+        return "Middle 2"
     return "Death"
 
 # -----------------------
 # cumulator: safe one-player summary (never returns None)
 # -----------------------
-def cumulator(temp_df: pd.DataFrame) -> pd.DataFrame:
-    if temp_df is None:
-        return pd.DataFrame()
-    d = temp_df.copy()
-    if d.empty:
-        return pd.DataFrame()
-
-    if 'p_match' in d.columns:
-        d = d.rename(columns={'p_match': 'match_id'})
-    if 'bat' in d.columns and 'batsman' not in d.columns:
-        d = d.rename(columns={'bat': 'batsman'})
-    if 'batruns' in d.columns and 'runs_off_bat' not in d.columns:
-        d = d.rename(columns={'batruns': 'runs_off_bat'})
-    elif 'score' in d.columns and 'runs_off_bat' not in d.columns:
-        d = d.rename(columns={'score': 'runs_off_bat'})
-    elif 'runs_off_bat' not in d.columns:
-        d['runs_off_bat'] = 0
-
-    d['cur_bat_runs'] = pd.to_numeric(d.get('cur_bat_runs', pd.Series([0]*len(d), index=d.index)), errors='coerce').fillna(0).astype(int)
-    d['cur_bat_bf']   = pd.to_numeric(d.get('cur_bat_bf', pd.Series([0]*len(d), index=d.index)), errors='coerce').fillna(0).astype(int)
-
-    if 'match_id' not in d.columns:
-        d['match_id'] = np.arange(len(d))
-
-    last_snapshot = (d.sort_values(['match_id', 'cur_bat_runs'])
-                      .groupby('match_id', sort=False, as_index=False)
-                      .agg(match_runs=('cur_bat_runs', 'last'), match_balls=('cur_bat_bf', 'last')))
-
-    total_runs = int(last_snapshot['match_runs'].sum()) if not last_snapshot.empty else 0
-    total_balls = int(last_snapshot['match_balls'].sum()) if not last_snapshot.empty else 0
-    matches = int(last_snapshot['match_id'].nunique()) if not last_snapshot.empty else 0
-
-    if 'out' in d.columns:
-        d['is_wkt'] = pd.to_numeric(d['out'], errors='coerce').fillna(0).astype(int)
-    else:
-        d['is_wkt'] = d.get('dismissal', pd.Series([None]*len(d), index=d.index)).notna().astype(int)
-    # count dismissals per match: max per match then sum
-    dismissals = int(d.groupby('match_id')['is_wkt'].max().sum()) if not d.empty else 0
-
-    d['runs_off_bat'] = pd.to_numeric(d.get('runs_off_bat', 0), errors='coerce').fillna(0).astype(int)
-    fours = int((d['runs_off_bat'] == 4).sum())
-    sixes = int((d['runs_off_bat'] == 6).sum())
-    dots = int(((d['runs_off_bat'] == 0) & (d.get('noball', 0) == 0) & (d.get('wide', 0) == 0)).sum())
-    ones = int((d['runs_off_bat'] == 1).sum())
-    twos = int((d['runs_off_bat'] == 2).sum())
-    threes = int((d['runs_off_bat'] == 3).sum())
-
-    HS = int(last_snapshot['match_runs'].max()) if not last_snapshot.empty else 0
-    median = float(last_snapshot['match_runs'].median()) if not last_snapshot.empty else 0.0
-
-    thirties = int((last_snapshot['match_runs'] >= 30).sum()) if not last_snapshot.empty else 0
-    fifties = int((last_snapshot['match_runs'] >= 50).sum()) if not last_snapshot.empty else 0
-    hundreds = int((last_snapshot['match_runs'] >= 100).sum()) if not last_snapshot.empty else 0
-
-    boundary_runs = int(fours * 4 + sixes * 6)
-    running_runs = int(ones * 1 + twos * 2 + threes * 3)
-
-    SR = (total_runs / total_balls * 100) if total_balls > 0 else np.nan
-    AVG = avg(total_runs, dismissals, matches)
-
-    batsman_name = d['batsman'].iloc[0] if 'batsman' in d.columns and not d['batsman'].isna().all() else None
-    summary = {
-        'batsman': batsman_name,
-        'matches': matches,
-        'runs': total_runs,
-        'balls': total_balls,
-        'dismissals': dismissals,
-        'HUNDREDS': hundreds,
-        'FIFTIES': fifties,
-        '30s': thirties,
-        'highest_score': HS,
-        'median': median,
-        'fours': fours,
-        'sixes': sixes,
-        'dots': dots,
-        'ones': ones,
-        'twos': twos,
-        'threes': threes,
-        'boundary_runs': boundary_runs,
-        'running_runs': running_runs,
-        'SR': SR,
-        'AVG': AVG
-    }
-    out = pd.DataFrame([summary])
-    return out
-
-# -----------------------
-# Custom: full batting summary (hardened)
-# -----------------------
 def Custom(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Batting summary builder with updated rules:
-      - legal_ball counts only if both wide and noball are 0
-      - 50s counted only when innings score is >=50 and <100
-      - enhanced dismissal resolution for run-outs / obstructing / retired
+    Batting summary builder with:
+      - legal_ball requires both wide & noball == 0
+      - 50s counted only when innings score >=50 and <100
+      - advanced dismissal resolution for run-out/obstruct/retired cases
     Returns bat_rec DataFrame (one row per batsman).
     """
     if df is None:
         return pd.DataFrame()
     d = df.copy()
 
-    # Normalize names
+    # ---- normalize column names ----
     if 'p_match' in d.columns:
         d = d.rename(columns={'p_match': 'match_id'})
     if 'inns' in d.columns and 'inning' not in d.columns:
@@ -208,15 +119,15 @@ def Custom(df: pd.DataFrame) -> pd.DataFrame:
     elif 'runs_off_bat' not in d.columns:
         d['runs_off_bat'] = 0
 
-    # Ensure index alignment for any fills
+    # ensure index alignment
     d.index = pd.RangeIndex(len(d))
 
-    # legal ball: count only if both wide and noball are 0
+    # ---- legal ball: both wide & noball must be 0 ----
     d['noball'] = pd.to_numeric(d.get('noball', 0), errors='coerce').fillna(0).astype(int)
     d['wide']   = pd.to_numeric(d.get('wide', 0), errors='coerce').fillna(0).astype(int)
     d['legal_ball'] = ((d['noball'] == 0) & (d['wide'] == 0)).astype(int)
 
-    # per-delivery runs flags
+    # ---- per-delivery flags ----
     d['runs_off_bat'] = pd.to_numeric(d.get('runs_off_bat', 0), errors='coerce').fillna(0).astype(int)
     d['is_dot']  = ((d['runs_off_bat'] == 0) & (d['legal_ball'] == 1)).astype(int)
     d['is_one']  = (d['runs_off_bat'] == 1).astype(int)
@@ -225,7 +136,7 @@ def Custom(df: pd.DataFrame) -> pd.DataFrame:
     d['is_four'] = (d['runs_off_bat'] == 4).astype(int)
     d['is_six']  = (d['runs_off_bat'] == 6).astype(int)
 
-    # create safe ball order
+    # safe ball ordering
     if 'ball_id' in d.columns:
         tmp = pd.to_numeric(d['ball_id'], errors='coerce')
         seq = pd.Series(np.arange(len(d)), index=d.index)
@@ -234,107 +145,97 @@ def Custom(df: pd.DataFrame) -> pd.DataFrame:
     else:
         d['__ball_sort__'] = pd.Series(np.arange(len(d)), index=d.index)
 
-    # --- Dismissal resolution ---
-    # We'll compute 'dismissed_player', 'is_wkt' (batsman dismissed on that delivery),
-    # and 'bowler_wkt' (credit to bowler) for each row.
+    # ---- dismissal normalization ----
     special_runout_types = set([
         'run out', 'runout', 'obstructing the field', 'obstructing thefield',
         'retired out', 'retired not out (hurt)', 'retired not out', 'retired out (hurt)'
     ])
-    # normalize dismissal column
     d['dismissal_clean'] = d.get('dismissal', pd.Series([None]*len(d), index=d.index)).astype(str).str.lower().str.strip()
-    # treat 'nan' or 'none' as blank
-    d['dismissal_clean'] = d['dismissal_clean'].replace({'nan':'', 'none':''})
+    d['dismissal_clean'] = d['dismissal_clean'].replace({'nan': '', 'none': ''})
 
-    # ensure p_bat/p_out numeric if exist
-    if 'p_bat' in d.columns:
-        d['p_bat_num'] = pd.to_numeric(d['p_bat'], errors='coerce')
-    else:
-        d['p_bat_num'] = np.nan
-    if 'p_out' in d.columns:
-        d['p_out_num'] = pd.to_numeric(d['p_out'], errors='coerce')
-    else:
-        d['p_out_num'] = np.nan
+    # numeric p_bat / p_out if present
+    d['p_bat_num'] = pd.to_numeric(d.get('p_bat', np.nan), errors='coerce')
+    d['p_out_num'] = pd.to_numeric(d.get('p_out', np.nan), errors='coerce')
 
+    # out flag as numeric 0/1
     d['out_flag'] = pd.to_numeric(d.get('out', 0), errors='coerce').fillna(0).astype(int)
 
-    # prepare to iterate per match
+    # prepare ordering by match and ball
+    if 'match_id' not in d.columns:
+        d['match_id'] = 0
     d.sort_values(['match_id', '__ball_sort__'], inplace=True, kind='stable')
     d.reset_index(drop=True, inplace=True)
 
-    # initialize columns
+    # initialize dismissal columns
     d['dismissed_player'] = None
-    d['is_wkt'] = 0
-    d['bowler_wkt'] = 0
+    d['is_wkt'] = 0           # batsman dismissed flag (1 for dismissed batsman)
+    d['bowler_wkt'] = 0       # credit to bowler for wicket (1 if bowler gets it)
 
-    # helper: find last different batsman before idx in same match
-    for match_id, grp_idx in d.groupby('match_id').groups.items():
-        idxs = list(grp_idx)
-        # ensure sorted by ball order
-        idxs_sorted = sorted(idxs, key=lambda i: d.at[i, '__ball_sort__'])
-        # iterate
-        for pos, i in enumerate(idxs_sorted):
-            row = d.loc[i]
-            if int(row['out_flag']) != 1:
-                # no explicit out flag; skip (not a wicket event)
+    # iterate per match to resolve special dismissals
+    matches = d['match_id'].unique()
+    for m in matches:
+        sub_idx = d.index[d['match_id'] == m].tolist()
+        # ensure in order
+        sub_idx = sorted(sub_idx, key=lambda i: d.at[i, '__ball_sort__'])
+        for pos, i in enumerate(sub_idx):
+            row_disc = (d.at[i, 'dismissal_clean'] or '').strip()
+            out_flag = int(d.at[i, 'out_flag']) if not pd.isna(d.at[i, 'out_flag']) else 0
+            striker = d.at[i, 'batsman'] if 'batsman' in d.columns else None
+
+            # only consider rows where out_flag is truthy (wicket event indicator)
+            if out_flag != 1:
                 continue
 
-            disc = (row['dismissal_clean'] or '').strip()
-            batsman = row.get('batsman', None)
-
-            # Default: striker out (will adjust for special types)
-            striker_out = True
-            # If dismissal type is NOT a special runout-like, striker is out and bowler gets credit
-            if disc and (disc not in special_runout_types):
-                d.at[i, 'dismissed_player'] = batsman
+            # if dismissal text exists AND is NOT a special run-out-like => striker out and bowler gets credit
+            if row_disc and (row_disc not in special_runout_types):
+                d.at[i, 'dismissed_player'] = striker
                 d.at[i, 'is_wkt'] = 1
-                d.at[i, 'bowler_wkt'] = 1  # credit to bowler for normal dismissals
+                d.at[i, 'bowler_wkt'] = 1
                 continue
 
-            # Else it's a special runout/obstructed/retired OR blank dismissal -> special handling
-            # If p_bat and p_out both numeric and equal -> striker out
-            pbat = row.get('p_bat_num', np.nan)
-            pout = row.get('p_out_num', np.nan)
+            # Otherwise (special run-out-like or blank) -> special handling
+            pbat = d.at[i, 'p_bat_num']
+            pout = d.at[i, 'p_out_num']
+
+            # if both p_bat and p_out numeric and equal -> striker out (no bowler credit)
             if (not pd.isna(pbat)) and (not pd.isna(pout)) and (pbat == pout):
-                d.at[i, 'dismissed_player'] = batsman
+                d.at[i, 'dismissed_player'] = striker
                 d.at[i, 'is_wkt'] = 1
-                d.at[i, 'bowler_wkt'] = 0  # runout-like not bowler wicket
+                d.at[i, 'bowler_wkt'] = 0
                 continue
 
-            # Otherwise attempt to find the non-striker: last batsman in this match before this ball
+            # else resolve nonstriker by scanning previous deliveries in same match
             nonstriker = None
-            # scan previous deliveries in this match in reverse order until we find a batsman != striker
-            for j in reversed(idxs_sorted[:pos]):
+            last_idx_of_nonstriker = None
+            # scan previous deliveries for last batsman not equal to striker
+            for j in reversed(sub_idx[:pos]):
                 prev_bat = d.at[j, 'batsman'] if 'batsman' in d.columns else None
-                if prev_bat is not None and prev_bat != batsman:
+                if prev_bat is not None and prev_bat != striker:
                     nonstriker = prev_bat
                     last_idx_of_nonstriker = j
                     break
 
             if nonstriker is None:
-                # fallback: mark striker out
-                d.at[i, 'dismissed_player'] = batsman
+                # fallback: mark striker out (conservative)
+                d.at[i, 'dismissed_player'] = striker
                 d.at[i, 'is_wkt'] = 1
                 d.at[i, 'bowler_wkt'] = 0
                 continue
 
-            # inspect last ball that nonstriker played (last_idx_of_nonstriker)
-            prev_row_out_flag = int(d.at[last_idx_of_nonstriker, 'out_flag']) if 'out_flag' in d.columns else 0
-            # If that previous row had out_flag == 0 -> nonstriker gets marked dismissed by this event
-            if prev_row_out_flag == 0:
+            # Inspect last ball that nonstriker played (last_idx_of_nonstriker)
+            prev_out_flag = int(d.at[last_idx_of_nonstriker, 'out_flag']) if last_idx_of_nonstriker is not None else 0
+            # If that last ball had out_flag == 0 -> nonstriker got out on current ball
+            if prev_out_flag == 0:
                 d.at[i, 'dismissed_player'] = nonstriker
                 d.at[i, 'is_wkt'] = 1
                 d.at[i, 'bowler_wkt'] = 0
             else:
-                # fallback to striker
-                d.at[i, 'dismissed_player'] = batsman
+                # fallback to striker dismissed
+                d.at[i, 'dismissed_player'] = striker
                 d.at[i, 'is_wkt'] = 1
                 d.at[i, 'bowler_wkt'] = 0
 
-    # use 'is_wkt' for batsman dismissals (some code expects 'is_wkt')
-    # and use bowler_wkt for bowling credit
-
-    # ---- ensure cumulative columns exist for per-match last-snapshot logic ----
+    # ---- ensure cumulative columns exist for per-match snapshot ----
     d['cur_bat_runs'] = pd.to_numeric(d.get('cur_bat_runs', 0), errors='coerce').fillna(0).astype(int)
     d['cur_bat_bf']   = pd.to_numeric(d.get('cur_bat_bf', 0), errors='coerce').fillna(0).astype(int)
 
@@ -345,13 +246,12 @@ def Custom(df: pd.DataFrame) -> pd.DataFrame:
          .rename(columns={'cur_bat_runs': 'match_runs', 'cur_bat_bf': 'match_balls'})
     )
 
-    # compute runs/balls/innings
     runs_per_match = last_bat_snapshot[['batsman', 'match_runs', 'match_balls', 'match_id']].copy()
     innings_count = runs_per_match.groupby('batsman')['match_id'].nunique().reset_index().rename(columns={'match_id': 'innings'})
     total_runs = runs_per_match.groupby('batsman')['match_runs'].sum().reset_index().rename(columns={'match_runs': 'runs'})
     total_balls = runs_per_match.groupby('batsman')['match_balls'].sum().reset_index().rename(columns={'match_balls': 'balls'})
 
-    # dismissals: use summed 'is_wkt' (our resolved dismissal). This avoids run-out credit issues.
+    # use resolved is_wkt (sum) as dismissals
     dismissals = d.groupby('batsman')['is_wkt'].sum().reset_index().rename(columns={'is_wkt': 'dismissals'})
 
     # boundary & running counts from per-delivery flags
@@ -362,7 +262,7 @@ def Custom(df: pd.DataFrame) -> pd.DataFrame:
     twos = d.groupby('batsman')['is_two'].sum().reset_index().rename(columns={'is_two': 'twos'})
     threes = d.groupby('batsman')['is_three'].sum().reset_index().rename(columns={'is_three': 'threes'})
 
-    # match-level thresholds
+    # match-level thresholds: 30s (30-49), 50s (50-99), 100s (>=100)
     thirties = runs_per_match[(runs_per_match['match_runs'] >= 30) & (runs_per_match['match_runs'] < 50)].groupby('batsman').size().reset_index(name='30s')
     fifties = runs_per_match[(runs_per_match['match_runs'] >= 50) & (runs_per_match['match_runs'] < 100)].groupby('batsman').size().reset_index(name='50s')
     hundreds = runs_per_match[runs_per_match['match_runs'] >= 100].groupby('batsman').size().reset_index(name='100s')
@@ -406,7 +306,7 @@ def Custom(df: pd.DataFrame) -> pd.DataFrame:
         if col in bat_rec.columns:
             bat_rec[col] = bat_rec[col].astype(int)
 
-    # basic ratios & metrics
+    # basic ratios & metrics (relying on your avg/bpd/bpb helpers)
     bat_rec['RPI'] = bat_rec.apply(lambda x: (x['runs'] / x['innings']) if x['innings'] > 0 else np.nan, axis=1)
     bat_rec['SR'] = bat_rec.apply(lambda x: (x['runs'] / x['balls'] * 100) if x['balls'] > 0 else np.nan, axis=1)
     bat_rec['BPD'] = bat_rec.apply(lambda x: bpd(x['balls'], x['dismissals']), axis=1)
@@ -488,6 +388,12 @@ def Custom(df: pd.DataFrame) -> pd.DataFrame:
 
     bat_rec.reset_index(drop=True, inplace=True)
     return bat_rec
+
+
+# -----------------------
+# Custom: full batting summary (hardened)
+# -----------------------
+
 
 def bowlerstat(df: pd.DataFrame) -> pd.DataFrame:
     """
