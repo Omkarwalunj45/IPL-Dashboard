@@ -15,6 +15,23 @@ def load_data():
     return df
 
 df = load_data()    
+def rename_rcb(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Renames 'Royal Challengers Bangalore' to 'Royal Challengers Bengaluru' in team_bat, team_bowl, and winner columns.
+    Returns the modified DataFrame.
+    """
+    d = df.copy()
+    
+    # List of columns to check and rename
+    columns_to_rename = ['team_bat', 'team_bowl', 'winner']
+    
+    # Rename 'Royal Challengers Bangalore' to 'Royal Challengers Bengaluru' in specified columns
+    for col in columns_to_rename:
+        if col in d.columns:
+            d[col] = d[col].replace('Royal Challengers Bangalore', 'Royal Challengers Bengaluru')
+    
+    return d
+df = rename_rcb(df)
 df['is_wicket'] = df['out'].astype(int)
 
 
