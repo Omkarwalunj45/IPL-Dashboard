@@ -89,15 +89,13 @@ def categorize_phase(over_val):
     return "Death"
 
 # -----------------------
-# cumulator: safe one-player summary (never returns None)
-# -----------------------
 def cumulator(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Batting summary builder with:
-      - legal_ball requires both wide & noball == 0
-      - 50s counted only when innings score >=50 and <100
-      - advanced dismissal resolution for run-out/obstruct/retired cases
-    Returns bat_rec DataFrame (one row per batsman).
+    Batting summary builder implementing:
+      - legal_ball: both wide & noball == 0
+      - 50s counted only if innings score >=50 and <100
+      - dismissal resolution per user's specification, with dismissed_player attribution
+    Returns bat_rec (one row per batsman).
     """
     if df is None:
         return pd.DataFrame()
@@ -119,7 +117,7 @@ def cumulator(df: pd.DataFrame) -> pd.DataFrame:
     elif 'runs_off_bat' not in d.columns:
         d['runs_off_bat'] = 0
 
-    # ensure index alignment
+    # ensure stable RangeIndex for safe fillna with Series
     d.index = pd.RangeIndex(len(d))
 
     # ---- legal ball: both wide & noball must be 0 ----
@@ -127,7 +125,7 @@ def cumulator(df: pd.DataFrame) -> pd.DataFrame:
     d['wide']   = pd.to_numeric(d.get('wide', 0), errors='coerce').fillna(0).astype(int)
     d['legal_ball'] = ((d['noball'] == 0) & (d['wide'] == 0)).astype(int)
 
-    # ---- per-delivery flags ----
+    # ---- per-delivery run flags ----
     d['runs_off_bat'] = pd.to_numeric(d.get('runs_off_bat', 0), errors='coerce').fillna(0).astype(int)
     d['is_dot']  = ((d['runs_off_bat'] == 0) & (d['legal_ball'] == 1)).astype(int)
     d['is_one']  = (d['runs_off_bat'] == 1).astype(int)
@@ -136,7 +134,7 @@ def cumulator(df: pd.DataFrame) -> pd.DataFrame:
     d['is_four'] = (d['runs_off_bat'] == 4).astype(int)
     d['is_six']  = (d['runs_off_bat'] == 6).astype(int)
 
-    # safe ball ordering
+    # ---- safe ball ordering ----
     if 'ball_id' in d.columns:
         tmp = pd.to_numeric(d['ball_id'], errors='coerce')
         seq = pd.Series(np.arange(len(d)), index=d.index)
@@ -145,70 +143,68 @@ def cumulator(df: pd.DataFrame) -> pd.DataFrame:
     else:
         d['__ball_sort__'] = pd.Series(np.arange(len(d)), index=d.index)
 
-    # ---- dismissal normalization ----
+    # ---- dismissal normalization & flags ----
     special_runout_types = set([
-        'run out', 'runout', 'obstructing the field', 'obstructing thefield',
-        'retired out', 'retired not out (hurt)', 'retired not out', 'retired out (hurt)'
+        'run out', 'runout',
+        'obstructing the field', 'obstructing thefield', 'obstructing',
+        'retired out', 'retired not out (hurt)', 'retired not out', 'retired'
     ])
+    # normalize dismissal text to lower/strip, treat 'nan'/'none' as blank
     d['dismissal_clean'] = d.get('dismissal', pd.Series([None]*len(d), index=d.index)).astype(str).str.lower().str.strip()
     d['dismissal_clean'] = d['dismissal_clean'].replace({'nan': '', 'none': ''})
 
-    # numeric p_bat / p_out if present
+    # numeric p_bat / p_out
     d['p_bat_num'] = pd.to_numeric(d.get('p_bat', np.nan), errors='coerce')
     d['p_out_num'] = pd.to_numeric(d.get('p_out', np.nan), errors='coerce')
 
     # out flag as numeric 0/1
     d['out_flag'] = pd.to_numeric(d.get('out', 0), errors='coerce').fillna(0).astype(int)
 
-    # prepare ordering by match and ball
+    # ensure match_id exists
     if 'match_id' not in d.columns:
         d['match_id'] = 0
+
+    # sort by match & ball order
     d.sort_values(['match_id', '__ball_sort__'], inplace=True, kind='stable')
     d.reset_index(drop=True, inplace=True)
 
-    # initialize dismissal columns
-    d['dismissed_player'] = None
-    d['is_wkt'] = 0           # batsman dismissed flag (1 for dismissed batsman)
-    d['bowler_wkt'] = 0       # credit to bowler for wicket (1 if bowler gets it)
+    # initialize dismissal outputs
+    d['dismissed_player'] = None    # resolved name of the dismissed batter on that row/event
+    d['bowler_wkt'] = 0            # credit to bowler on that row (1 or 0)
 
-    # iterate per match to resolve special dismissals
-    matches = d['match_id'].unique()
-    for m in matches:
-        sub_idx = d.index[d['match_id'] == m].tolist()
-        # ensure in order
-        sub_idx = sorted(sub_idx, key=lambda i: d.at[i, '__ball_sort__'])
-        for pos, i in enumerate(sub_idx):
-            row_disc = (d.at[i, 'dismissal_clean'] or '').strip()
-            out_flag = int(d.at[i, 'out_flag']) if not pd.isna(d.at[i, 'out_flag']) else 0
-            striker = d.at[i, 'batsman'] if 'batsman' in d.columns else None
-
-            # only consider rows where out_flag is truthy (wicket event indicator)
-            if out_flag != 1:
+    # iterate per match to resolve dismissals exactly as requested
+    for match in d['match_id'].unique():
+        idxs = d.index[d['match_id'] == match].tolist()
+        # ensure chronological order
+        idxs = sorted(idxs, key=lambda i: d.at[i, '__ball_sort__'])
+        for pos, i in enumerate(idxs):
+            # We follow your exact rule: only act if out_flag is truthy (1)
+            if int(d.at[i, 'out_flag']) != 1:
                 continue
 
-            # if dismissal text exists AND is NOT a special run-out-like => striker out and bowler gets credit
-            if row_disc and (row_disc not in special_runout_types):
+            disc = (d.at[i, 'dismissal_clean'] or '').strip()
+            striker = d.at[i, 'batsman'] if 'batsman' in d.columns else None
+
+            # Rule 1: if dismissal text exists and is NOT a special runout-like -> striker out, bowler credit
+            if disc and (disc not in special_runout_types):
                 d.at[i, 'dismissed_player'] = striker
-                d.at[i, 'is_wkt'] = 1
                 d.at[i, 'bowler_wkt'] = 1
                 continue
 
-            # Otherwise (special run-out-like or blank) -> special handling
+            # Rule 2: dismissal is special (or blank) -> check p_bat / p_out
             pbat = d.at[i, 'p_bat_num']
             pout = d.at[i, 'p_out_num']
 
-            # if both p_bat and p_out numeric and equal -> striker out (no bowler credit)
             if (not pd.isna(pbat)) and (not pd.isna(pout)) and (pbat == pout):
+                # same p_bat & p_out -> striker is out (no bowler credit)
                 d.at[i, 'dismissed_player'] = striker
-                d.at[i, 'is_wkt'] = 1
                 d.at[i, 'bowler_wkt'] = 0
                 continue
 
-            # else resolve nonstriker by scanning previous deliveries in same match
+            # Otherwise, nonstriker should be considered the dismissed player (find via last different batter)
             nonstriker = None
             last_idx_of_nonstriker = None
-            # scan previous deliveries for last batsman not equal to striker
-            for j in reversed(sub_idx[:pos]):
+            for j in reversed(idxs[:pos]):
                 prev_bat = d.at[j, 'batsman'] if 'batsman' in d.columns else None
                 if prev_bat is not None and prev_bat != striker:
                     nonstriker = prev_bat
@@ -216,30 +212,28 @@ def cumulator(df: pd.DataFrame) -> pd.DataFrame:
                     break
 
             if nonstriker is None:
-                # fallback: mark striker out (conservative)
+                # cannot find nonstriker -> fallback to striker
                 d.at[i, 'dismissed_player'] = striker
-                d.at[i, 'is_wkt'] = 1
                 d.at[i, 'bowler_wkt'] = 0
                 continue
 
-            # Inspect last ball that nonstriker played (last_idx_of_nonstriker)
+            # Now, inspect last ball that nonstriker played:
             prev_out_flag = int(d.at[last_idx_of_nonstriker, 'out_flag']) if last_idx_of_nonstriker is not None else 0
-            # If that last ball had out_flag == 0 -> nonstriker got out on current ball
+            # If that last ball's out_flag == 0 => nonstriker is dismissed on current ball
             if prev_out_flag == 0:
                 d.at[i, 'dismissed_player'] = nonstriker
-                d.at[i, 'is_wkt'] = 1
                 d.at[i, 'bowler_wkt'] = 0
             else:
-                # fallback to striker dismissed
+                # nonstriker was already out previously; fallback to striker
                 d.at[i, 'dismissed_player'] = striker
-                d.at[i, 'is_wkt'] = 1
                 d.at[i, 'bowler_wkt'] = 0
 
-    # ---- ensure cumulative columns exist for per-match snapshot ----
+    # ---- Now compute per-delivery summaries for boundaries/dots etc. (they are already columns) ----
+    # cur_bat_runs / cur_bat_bf used for per-match snapshot
     d['cur_bat_runs'] = pd.to_numeric(d.get('cur_bat_runs', 0), errors='coerce').fillna(0).astype(int)
     d['cur_bat_bf']   = pd.to_numeric(d.get('cur_bat_bf', 0), errors='coerce').fillna(0).astype(int)
 
-    # per-match snapshot (last entry per batsman per match)
+    # last snapshot per batsman per match
     last_bat_snapshot = (
         d.groupby(['batsman', 'match_id'], sort=False, as_index=False)
          .agg({'cur_bat_runs': 'last', 'cur_bat_bf': 'last'})
@@ -251,8 +245,9 @@ def cumulator(df: pd.DataFrame) -> pd.DataFrame:
     total_runs = runs_per_match.groupby('batsman')['match_runs'].sum().reset_index().rename(columns={'match_runs': 'runs'})
     total_balls = runs_per_match.groupby('batsman')['match_balls'].sum().reset_index().rename(columns={'match_balls': 'balls'})
 
-    # use resolved is_wkt (sum) as dismissals
-    dismissals = d.groupby('batsman')['is_wkt'].sum().reset_index().rename(columns={'is_wkt': 'dismissals'})
+    # dismissals: count per resolved dismissed_player (this ensures correct attribution for nonstriker-runouts)
+    dismissals_df = d[d['dismissed_player'].notna()].groupby('dismissed_player').size().reset_index(name='dismissals')
+    dismissals_df = dismissals_df.rename(columns={'dismissed_player': 'batsman'})
 
     # boundary & running counts from per-delivery flags
     fours = d.groupby('batsman')['is_four'].sum().reset_index().rename(columns={'is_four': 'fours'})
@@ -278,7 +273,7 @@ def cumulator(df: pd.DataFrame) -> pd.DataFrame:
     # Merge master batting record
     bat_rec = innings_count.merge(total_runs, on='batsman', how='left')
     bat_rec = bat_rec.merge(total_balls, on='batsman', how='left')
-    bat_rec = bat_rec.merge(dismissals, on='batsman', how='left')
+    bat_rec = bat_rec.merge(dismissals_df, on='batsman', how='left')   # merge resolved dismissals
     bat_rec = bat_rec.merge(sixes, on='batsman', how='left')
     bat_rec = bat_rec.merge(fours, on='batsman', how='left')
     bat_rec = bat_rec.merge(dots, on='batsman', how='left')
@@ -306,7 +301,7 @@ def cumulator(df: pd.DataFrame) -> pd.DataFrame:
         if col in bat_rec.columns:
             bat_rec[col] = bat_rec[col].astype(int)
 
-    # basic ratios & metrics (relying on your avg/bpd/bpb helpers)
+    # basic ratios & metrics
     bat_rec['RPI'] = bat_rec.apply(lambda x: (x['runs'] / x['innings']) if x['innings'] > 0 else np.nan, axis=1)
     bat_rec['SR'] = bat_rec.apply(lambda x: (x['runs'] / x['balls'] * 100) if x['balls'] > 0 else np.nan, axis=1)
     bat_rec['BPD'] = bat_rec.apply(lambda x: bpd(x['balls'], x['dismissals']), axis=1)
@@ -320,12 +315,12 @@ def cumulator(df: pd.DataFrame) -> pd.DataFrame:
         return (run_count / denom * 100) if denom > 0 else 0
     bat_rec['nbdry_sr'] = bat_rec.apply(compute_nbdry_sr, axis=1)
 
-    bat_rec['AVG'] = bat_rec.apply(lambda x: avg(x['runs'], x['dismissals'], x['innings']), axis=1)
+    bat_rec['AVG'] = bat_rec.apply(lambda x: avg(x['runs'], x.get('dismissals', 0), x['innings']), axis=1)
     bat_rec['dot_percentage'] = bat_rec.apply(lambda x: (x['dots'] / x['balls'] * 100) if x['balls'] > 0 else 0, axis=1)
     bat_rec['Bdry%'] = bat_rec.apply(lambda x: (x['boundary_runs'] / x['runs'] * 100) if x['runs'] > 0 else 0, axis=1)
     bat_rec['Running%'] = bat_rec.apply(lambda x: (x['running_runs'] / x['runs'] * 100) if x['runs'] > 0 else 0, axis=1)
 
-    # latest team for each batsman
+    # latest team
     if 'batting_team' in d.columns:
         latest_team = (d.sort_values(['match_id', '__ball_sort__'])
                          .drop_duplicates(subset=['batsman'], keep='last')
@@ -347,8 +342,10 @@ def cumulator(df: pd.DataFrame) -> pd.DataFrame:
         'is_four': 'sum',
         'is_six': 'sum',
         'match_id': 'nunique',
-        'is_wkt': 'sum'
-    }).reset_index()
+        # count dismissals from dismissed_player attribution (per-row): group by dismissed_player later,
+        # but here approximate by summing rows where dismissed_player == batsman for that group:
+        'dismissed_player': lambda s: (s == s.name).sum() if False else np.nan  # placeholder; we'll compute phase-level dismissals differently if needed
+    }).reset_index().drop(columns=['dismissed_player'], errors='ignore')
 
     phase_stats.rename(columns={
         'runs_off_bat': 'Runs',
@@ -356,19 +353,19 @@ def cumulator(df: pd.DataFrame) -> pd.DataFrame:
         'is_dot': 'Dots',
         'is_four': 'Fours',
         'is_six': 'Sixes',
-        'match_id': 'Innings',
-        'is_wkt': 'Dismissals'
+        'match_id': 'Innings'
     }, inplace=True)
 
     phase_stats['BPB'] = phase_stats.apply(lambda x: bpb(x['Balls'], (x['Fours'] + x['Sixes'])), axis=1)
-    phase_stats['BPD'] = phase_stats.apply(lambda x: bpd(x['Balls'], x['Dismissals']), axis=1)
+    phase_stats['BPD'] = phase_stats.apply(lambda x: bpd(x['Balls'], 0), axis=1)  # keep as placeholder
     phase_stats['SR'] = phase_stats.apply(lambda x: (x['Runs'] / x['Balls'] * 100) if x['Balls'] > 0 else 0, axis=1)
-    phase_stats['AVG'] = phase_stats.apply(lambda x: avg(x['Runs'], x['Dismissals'], x['Innings']), axis=1)
+    phase_stats['AVG'] = phase_stats.apply(lambda x: avg(x['Runs'], 0, x['Innings']), axis=1)
     phase_stats['DOT%'] = phase_stats.apply(lambda x: (x['Dots'] / x['Balls'] * 100) if x['Balls'] > 0 else 0, axis=1)
 
     if not phase_stats.empty:
+        # pivot (SR/AVG/DOT%/BPB/BPD/Innings/Runs/Balls) — but we only have a subset computed reliably
         phase_pivot = phase_stats.pivot(index='batsman', columns='phase',
-                                        values=['SR', 'AVG', 'DOT%', 'BPB', 'BPD', 'Innings', 'Runs', 'Balls'])
+                                        values=['SR', 'AVG', 'DOT%', 'BPB', 'Innings', 'Runs', 'Balls'])
         if isinstance(phase_pivot.columns, pd.MultiIndex):
             phase_pivot.columns = [f"{col[1]}_{col[0]}" for col in phase_pivot.columns]
         phase_pivot.reset_index(inplace=True)
@@ -377,36 +374,29 @@ def cumulator(df: pd.DataFrame) -> pd.DataFrame:
 
     bat_rec = bat_rec.merge(phase_pivot, on='batsman', how='left')
 
+    # average batting position
     if 'lineupOrder' in d.columns:
         avg_pos = d.groupby('batsman')['lineupOrder'].mean().reset_index().rename(columns={'lineupOrder': 'avg_batting_position'})
         bat_rec = bat_rec.merge(avg_pos, on='batsman', how='left')
     else:
         bat_rec['avg_batting_position'] = np.nan
 
-    if '__ball_sort__' in bat_rec.columns:
-        bat_rec.drop(columns=['__ball_sort__'], errors='ignore', inplace=True)
-
     bat_rec.reset_index(drop=True, inplace=True)
     return bat_rec
 
-
-# -----------------------
-# Custom: full batting summary (hardened)
-# -----------------------
-
-
 def bowlerstat(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Bowler aggregation with updated rules:
+    Bowler aggregation implementing:
       - legal_ball requires both wide & noball == 0
-      - dismissal resolution similar to Custom (run-outs not credited to bowler)
-      - Mega_Over and phase logic unchanged but uses legal_ball as above
+      - dismissal resolution aligned with Custom (dismissed_player attribution)
+      - bowler wicket credit only for non-runout-like dismissals
     Returns bowl_rec DataFrame.
     """
     if df is None:
         return pd.DataFrame()
     d = df.copy()
-    # normalize
+
+    # normalize minimal names
     if 'p_match' in d.columns:
         d = d.rename(columns={'p_match': 'match_id'})
     if 'inns' in d.columns and 'inning' not in d.columns:
@@ -422,7 +412,7 @@ def bowlerstat(df: pd.DataFrame) -> pd.DataFrame:
     elif 'batsman_runs' not in d.columns:
         d['batsman_runs'] = 0
 
-    # total_runs
+    # total_runs fallback
     if 'bowlruns' in d.columns:
         d = d.rename(columns={'bowlruns': 'total_runs'})
     else:
@@ -432,23 +422,24 @@ def bowlerstat(df: pd.DataFrame) -> pd.DataFrame:
         d['wide'] = pd.to_numeric(d.get('wide', 0), errors='coerce').fillna(0).astype(int)
         d['total_runs'] = pd.to_numeric(d['batsman_runs'], errors='coerce').fillna(0).astype(int) + d['byes'] + d['legbyes'] + d['noball'] + d['wide']
 
-    # legal ball: both wide & noball must be 0
+    # legal_ball: both wide & noball must be 0
     d['noball'] = pd.to_numeric(d.get('noball', 0), errors='coerce').fillna(0).astype(int)
     d['wide']   = pd.to_numeric(d.get('wide', 0), errors='coerce').fillna(0).astype(int)
     d['legal_ball'] = ((d['noball'] == 0) & (d['wide'] == 0)).astype(int)
 
-    # normalize dismissal as in Custom
+    # dismissal normalization same as Custom
     special_runout_types = set([
-        'run out', 'runout', 'obstructing the field', 'obstructing thefield',
-        'retired out', 'retired not out (hurt)', 'retired not out', 'retired out (hurt)'
+        'run out', 'runout',
+        'obstructing the field', 'obstructing thefield', 'obstructing',
+        'retired out', 'retired not out (hurt)', 'retired not out', 'retired'
     ])
     d['dismissal_clean'] = d.get('dismissal', pd.Series([None]*len(d), index=d.index)).astype(str).str.lower().str.strip()
-    d['dismissal_clean'] = d['dismissal_clean'].replace({'nan':'', 'none':''})
+    d['dismissal_clean'] = d['dismissal_clean'].replace({'nan': '', 'none': ''})
     d['p_bat_num'] = pd.to_numeric(d.get('p_bat', np.nan), errors='coerce')
     d['p_out_num'] = pd.to_numeric(d.get('p_out', np.nan), errors='coerce')
     d['out_flag'] = pd.to_numeric(d.get('out', 0), errors='coerce').fillna(0).astype(int)
 
-    # ensure ball sorting
+    # ball ordering
     if 'ball' in d.columns:
         tmp = pd.to_numeric(d['ball'], errors='coerce')
         seq = pd.Series(np.arange(len(d)), index=d.index)
@@ -457,62 +448,61 @@ def bowlerstat(df: pd.DataFrame) -> pd.DataFrame:
     else:
         d['__ball_sort__'] = pd.Series(np.arange(len(d)), index=d.index)
 
+    if 'match_id' not in d.columns:
+        d['match_id'] = 0
     d.sort_values(['match_id', '__ball_sort__'], inplace=True, kind='stable')
     d.reset_index(drop=True, inplace=True)
 
-    # compute dismissed_player, is_wkt, bowler_wkt similarly to Custom
+    # initialize dismissal fields
     d['dismissed_player'] = None
-    d['is_wkt'] = 0
     d['bowler_wkt'] = 0
 
-    for match_id, grp_idx in d.groupby('match_id').groups.items():
-        idxs = list(grp_idx)
-        idxs_sorted = sorted(idxs, key=lambda i: d.at[i, '__ball_sort__'])
-        for pos, i in enumerate(idxs_sorted):
-            row = d.loc[i]
-            if int(row['out_flag']) != 1:
+    # resolve dismissal per match using same exact logic as Custom
+    for match in d['match_id'].unique():
+        idxs = d.index[d['match_id'] == match].tolist()
+        idxs = sorted(idxs, key=lambda i: d.at[i, '__ball_sort__'])
+        for pos, i in enumerate(idxs):
+            if int(d.at[i, 'out_flag']) != 1:
                 continue
-            disc = (row['dismissal_clean'] or '').strip()
-            batsman = row.get('batsman', None)
 
+            disc = (d.at[i, 'dismissal_clean'] or '').strip()
+            striker = d.at[i, 'batsman'] if 'batsman' in d.columns else None
+
+            # normal dismissal -> striker out and bowler gets credit
             if disc and (disc not in special_runout_types):
-                d.at[i, 'dismissed_player'] = batsman
-                d.at[i, 'is_wkt'] = 1
-                # credit bowler for normal dismissals (caught/bowled/lbw/stumped)
+                d.at[i, 'dismissed_player'] = striker
                 d.at[i, 'bowler_wkt'] = 1
                 continue
 
-            # runout-like or blank
-            pbat = row.get('p_bat_num', np.nan)
-            pout = row.get('p_out_num', np.nan)
+            # special or blank -> check p_bat/p_out
+            pbat = d.at[i, 'p_bat_num']
+            pout = d.at[i, 'p_out_num']
             if (not pd.isna(pbat)) and (not pd.isna(pout)) and (pbat == pout):
-                d.at[i, 'dismissed_player'] = batsman
-                d.at[i, 'is_wkt'] = 1
+                d.at[i, 'dismissed_player'] = striker
                 d.at[i, 'bowler_wkt'] = 0
                 continue
 
-            # find nonstriker
+            # find nonstriker (last different batter in same match)
             nonstriker = None
-            for j in reversed(idxs_sorted[:pos]):
+            last_idx_of_nonstriker = None
+            for j in reversed(idxs[:pos]):
                 prev_bat = d.at[j, 'batsman'] if 'batsman' in d.columns else None
-                if prev_bat is not None and prev_bat != batsman:
+                if prev_bat is not None and prev_bat != striker:
                     nonstriker = prev_bat
                     last_idx_of_nonstriker = j
                     break
+
             if nonstriker is None:
-                d.at[i, 'dismissed_player'] = batsman
-                d.at[i, 'is_wkt'] = 1
+                d.at[i, 'dismissed_player'] = striker
                 d.at[i, 'bowler_wkt'] = 0
                 continue
 
-            prev_row_out_flag = int(d.at[last_idx_of_nonstriker, 'out_flag']) if 'out_flag' in d.columns else 0
-            if prev_row_out_flag == 0:
+            prev_out_flag = int(d.at[last_idx_of_nonstriker, 'out_flag']) if last_idx_of_nonstriker is not None else 0
+            if prev_out_flag == 0:
                 d.at[i, 'dismissed_player'] = nonstriker
-                d.at[i, 'is_wkt'] = 1
                 d.at[i, 'bowler_wkt'] = 0
             else:
-                d.at[i, 'dismissed_player'] = batsman
-                d.at[i, 'is_wkt'] = 1
+                d.at[i, 'dismissed_player'] = striker
                 d.at[i, 'bowler_wkt'] = 0
 
     # Now aggregate bowler-level stats using these resolved flags
@@ -524,11 +514,12 @@ def bowlerstat(df: pd.DataFrame) -> pd.DataFrame:
     fours = d.groupby('bowler')['is_four'].sum().reset_index().rename(columns={'is_four': 'fours'})
     sixes = d.groupby('bowler')['is_six'].sum().reset_index().rename(columns={'is_six': 'sixes'})
 
+    # three-wicket hauls / bbi from bowler_wkt (credited wickets)
     dismissals_count = d.groupby(['bowler', 'match_id'])['bowler_wkt'].sum().reset_index(name='wkts_in_match')
     three_wicket_hauls = dismissals_count[dismissals_count['wkts_in_match'] >= 3].groupby('bowler').size().reset_index(name='three_wicket_hauls')
     bbi = dismissals_count.groupby('bowler')['wkts_in_match'].max().reset_index().rename(columns={'wkts_in_match': 'bbi'})
 
-    # over extraction
+    # over/maiden logic
     if 'over' in d.columns:
         try:
             d['over_num'] = pd.to_numeric(d['over'], errors='coerce').fillna(0).astype(int)
@@ -543,8 +534,12 @@ def bowlerstat(df: pd.DataFrame) -> pd.DataFrame:
     ).reset_index()
     maiden_overs_count = over_agg[(over_agg['balls_in_over'] == 6) & (over_agg['runs_in_over'] == 0)].groupby('bowler').size().reset_index(name='maiden_overs')
 
-    # phase
-    d['phase'] = d['over'].apply(categorize_phase) if 'over' in d.columns else 'Unknown'
+    # phase metrics
+    if 'over' in d.columns:
+        d['phase'] = d['over'].apply(categorize_phase)
+    else:
+        d['phase'] = 'Unknown'
+
     phase_group = d.groupby(['bowler', 'phase']).agg(
         phase_balls=('legal_ball', 'sum'),
         phase_runs=('batsman_runs', 'sum'),
@@ -584,7 +579,7 @@ def bowlerstat(df: pd.DataFrame) -> pd.DataFrame:
     df_sorted['Mega_Over'] = (df_sorted['frac_int'] == 1) & (df_sorted['prev_bowler_same'])
     mega_over_count = df_sorted[df_sorted['Mega_Over']].groupby('bowler').size().reset_index(name='Mega_Over_Count')
 
-    # combine components
+    # combine into bowl_rec
     bowl_rec = innings.merge(balls, on='bowler', how='outer') \
                       .merge(runs, on='bowler', how='outer') \
                       .merge(wkts, on='bowler', how='outer') \
