@@ -1705,13 +1705,7 @@ elif sidebar_option == "Matchup Analysis":
                     pass
 
         # Download raw matchup CSV
-        csv = matchup_df.to_csv(index=False)
-        st.download_button(
-            label="Download raw matchup rows (CSV)",
-            data=csv,
-            file_name=f"{str(batter_name)}_vs_{str(bowler_name)}_matchup.csv",
-            mime="text/csv"
-        )
+
 
         # Helper: Apply formatting to individual summary dataframe
         def format_summary_df(temp_summary):
@@ -1812,6 +1806,7 @@ elif sidebar_option == "Matchup Analysis":
             out = beautify_columns(out)
             st.markdown(f"### {title}")
             st.write(out)
+            return out
             # st.dataframe(out.style.set_table_styles(table_styles), use_container_width=True)
             
 
@@ -1844,7 +1839,14 @@ elif sidebar_option == "Matchup Analysis":
                     temp_summary.insert(0, 'year', s)
                     all_seasons.append(temp_summary)
 
-                finalize_and_show(all_seasons, 'year', "Yearwise Performance", header_color="#efe6ff")
+                out=finalize_and_show(all_seasons, 'year', "Yearwise Performance", header_color="#efe6ff")
+                csv = out.to_csv(index=False)
+                st.download_button(
+                    label="Download raw matchup rows (CSV)",
+                    data=csv,
+                    file_name=f"{str(batter_name)}_vs_{str(bowler_name)}_matchup.csv",
+                    mime="text/csv"
+                )
 
         # -------------------
         # Match grouping
@@ -1869,7 +1871,14 @@ elif sidebar_option == "Matchup Analysis":
                     temp_summary.insert(0, 'match_id', m)
                     all_matches.append(temp_summary)
 
-                finalize_and_show(all_matches, 'match_id', "Matchwise Performance", header_color="#e6f7ff")
+                out=finalize_and_show(all_seasons, 'year', "Yearwise Performance", header_color="#efe6ff")
+                csv = out.to_csv(index=False)
+                st.download_button(
+                    label="Download raw matchup rows (CSV)",
+                    data=csv,
+                    file_name=f"{str(batter_name)}_vs_{str(bowler_name)}_matchup.csv",
+                    mime="text/csv"
+                )
 
         # -------------------
         # Venue grouping
@@ -1894,7 +1903,14 @@ elif sidebar_option == "Matchup Analysis":
                     temp_summary.insert(0, 'venue', v)
                     all_venues.append(temp_summary)
 
-                finalize_and_show(all_venues, 'venue', "Venuewise Performance", header_color="#e6f7ff")
+                out=finalize_and_show(all_seasons, 'year', "Yearwise Performance", header_color="#efe6ff")
+                csv = out.to_csv(index=False)
+                st.download_button(
+                    label="Download raw matchup rows (CSV)",
+                    data=csv,
+                    file_name=f"{str(batter_name)}_vs_{str(bowler_name)}_matchup.csv",
+                    mime="text/csv"
+                )
 
         # -------------------
         # Inning grouping
@@ -1920,6 +1936,13 @@ elif sidebar_option == "Matchup Analysis":
                     all_inns.append(temp_summary)
 
                 finalize_and_show(all_inns, 'inning', "Inningwise Performance", header_color="#e6f7ff")
+                csv = out.to_csv(index=False)
+                st.download_button(
+                    label="Download raw matchup rows (CSV)",
+                    data=csv,
+                    file_name=f"{str(batter_name)}_vs_{str(bowler_name)}_matchup.csv",
+                    mime="text/csv"
+                )
 
         else:
             st.info("Unknown grouping option selected.")
