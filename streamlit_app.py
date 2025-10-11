@@ -1068,7 +1068,7 @@ if sidebar_option == "Player Profile":
         #                 result_df = round_up_floats(result_df)
         #                 st.markdown("### 🏟️ Inningwise Performance")
         #                 st.dataframe(result_df.reset_index(drop=True), use_container_width=True)
-        if option=='Batting:
+        if option=='Batting':
             def batting_stats_display(df, idf, player_name, option):
                 if option == "Batting":
                     player_stats = idf[idf['batsman'] == player_name]
