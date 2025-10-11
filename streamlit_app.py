@@ -35,10 +35,6 @@ def round_up_floats(df: pd.DataFrame, decimals: int = 2) -> pd.DataFrame:
         if pd.api.types.is_float_dtype(df[col].dtype):
             df[col] = df[col].round(decimals)
     return df
-
-import pandas as pd
-import numpy as np
-
 def bpd(balls, dismissals):
     return balls / dismissals if dismissals > 0 else np.nan
 
@@ -67,8 +63,8 @@ def cumulator(df: pd.DataFrame) -> pd.DataFrame:
     Batting summary builder implementing:
       - legal_ball: both wide & noball == 0
       - 50s counted only if innings score >=50 and <100
-      - dismissal resolution per user's specification, with dismissed_player attribution
-      - Non-striker is the last different batsman in the same inns and p_match with out=False
+      - Dismissal logic: non-striker is last different batsman in same inns and p_match with out=False
+      - No dismissal attribution if non-striker invalid or already dismissed
     Returns bat_rec (one row per batsman).
     """
     if df is None:
@@ -93,20 +89,6 @@ def cumulator(df: pd.DataFrame) -> pd.DataFrame:
 
     # ensure stable RangeIndex
     d.index = pd.RangeIndex(len(d))
-
-    # ---- legal ball: both wide & noball must be 0 ----
-    d['noball'] = pd.to_numeric(d.get('noball', 0), errors='coerce').fillna(0).astype(int)
-    d['wide'] = pd.to_numeric(d.get('wide', 0), errors='coerce').fillna(0).astype(int)
-    d['legal_ball'] = ((d['noball'] == 0) & (d['wide'] == 0)).astype(int)
-
-    # ---- per-delivery run flags ----
-    d['runs_off_bat'] = pd.to_numeric(d.get('runs_off_bat', 0), errors='coerce').fillna(0).astype(int)
-    d['is_dot'] = ((d['runs_off_bat'] == 0) & (d['legal_ball'] == 1)).astype(int)
-    d['is_one'] = (d['runs_off_bat'] == 1).astype(int)
-    d['is_two'] = (d['runs_off_bat'] == 2).astype(int)
-    d['is_three'] = (d['runs_off_bat'] == 3).astype(int)
-    d['is_four'] = (d['runs_off_bat'] == 4).astype(int)
-    d['is_six'] = (d['runs_off_bat'] == 6).astype(int)
 
     # ---- safe ball ordering ----
     if 'ball_id' in d.columns:
@@ -197,6 +179,20 @@ def cumulator(df: pd.DataFrame) -> pd.DataFrame:
     # ---- compute per-delivery summaries ----
     d['cur_bat_runs'] = pd.to_numeric(d.get('cur_bat_runs', 0), errors='coerce').fillna(0).astype(int)
     d['cur_bat_bf'] = pd.to_numeric(d.get('cur_bat_bf', 0), errors='coerce').fillna(0).astype(int)
+
+    # legal ball: both wide & noball must be 0
+    d['noball'] = pd.to_numeric(d.get('noball', 0), errors='coerce').fillna(0).astype(int)
+    d['wide'] = pd.to_numeric(d.get('wide', 0), errors='coerce').fillna(0).astype(int)
+    d['legal_ball'] = ((d['noball'] == 0) & (d['wide'] == 0)).astype(int)
+
+    # per-delivery run flags
+    d['runs_off_bat'] = pd.to_numeric(d.get('runs_off_bat', 0), errors='coerce').fillna(0).astype(int)
+    d['is_dot'] = ((d['runs_off_bat'] == 0) & (d['legal_ball'] == 1)).astype(int)
+    d['is_one'] = (d['runs_off_bat'] == 1).astype(int)
+    d['is_two'] = (d['runs_off_bat'] == 2).astype(int)
+    d['is_three'] = (d['runs_off_bat'] == 3).astype(int)
+    d['is_four'] = (d['runs_off_bat'] == 4).astype(int)
+    d['is_six'] = (d['runs_off_bat'] == 6).astype(int)
 
     # last snapshot per batsman per match
     last_bat_snapshot = (
