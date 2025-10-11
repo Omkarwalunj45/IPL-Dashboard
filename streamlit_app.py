@@ -1791,7 +1791,7 @@ elif sidebar_option == "Matchup Analysis":
             if primary_col_name_norm in cols:
                 new_order = [primary_col_name_norm] + [c for c in cols if c != primary_col_name_norm]
                 out = out[new_order]
-            
+            out=round_up_floats(out)
             # Basic light header styling
             table_styles = [
                 {"selector": "thead th", "props": [("background-color", header_color), ("color", "#000"), ("font-weight", "600")]},
@@ -1826,7 +1826,6 @@ elif sidebar_option == "Matchup Analysis":
                     temp_summary=round_up_floats(temp_summary)
                     temp_summary.insert(0, 'year', s)
                     all_seasons.append(temp_summary)
-                    all_seasons=round_up_floats(all_seasons)
 
                 finalize_and_show(all_seasons, 'year', "Yearwise Performance", header_color="#efe6ff")
 
