@@ -1771,7 +1771,7 @@ elif sidebar_option == "Matchup Analysis":
             
             # Now normalize display column names
             out = normalize_display_columns(out)
-            
+            out = round_up_floats(out)
             # Ensure primary column name is uppercase & spaced
             primary_col_name_norm = str(primary_col_name).upper().replace('_', ' ')
             
