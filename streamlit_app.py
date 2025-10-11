@@ -1660,22 +1660,6 @@ elif sidebar_option == "Matchup Analysis":
             else:
                 return pd.DataFrame(x)
 
-    try:
-        safe_get_col
-    except NameError:
-        def safe_get_col(df_local, candidates, default=None):
-            for c in candidates:
-                if c in df_local.columns:
-                    return c
-            return default
-
-    # Ensure df exists
-    try:
-        df
-    except NameError:
-        st.error("Raw ball-by-ball DataFrame 'df' not found. Load data before using Matchup Analysis.")
-        st.stop()
-
     bdf = as_dataframe(df)
 
     # Detect column names in your data
@@ -1733,12 +1717,19 @@ elif sidebar_option == "Matchup Analysis":
             """Format a single summary dataframe with proper types"""
             df = temp_summary.copy()
             
-            # First, identify and convert integer columns (before normalizing column names)
+            # Convert ALL numeric columns first
+            for col in df.columns:
+                try:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+                except:
+                    pass
+            
+            # Now identify and convert integer columns
             for col in df.columns:
                 col_lower = str(col).lower()
                 # Check if column name contains 'innings', 'runs', or 'balls'
                 if any(keyword in col_lower for keyword in ['innings', 'inning', 'runs', 'balls', 'wickets', 'wkts', 'dismissals', 'matches', 'fours', 'sixes', 'dots']):
-                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+                    df[col] = df[col].fillna(0).astype(int)
             
             # Round all other numeric columns to 2 decimals
             numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
@@ -1746,10 +1737,7 @@ elif sidebar_option == "Matchup Analysis":
                 # Skip if already integer type
                 if df[nc].dtype == int:
                     continue
-                try:
-                    df[nc] = df[nc].round(2)
-                except Exception:
-                    pass
+                df[nc] = df[nc].round(2)
             
             return df
 
@@ -1900,6 +1888,5 @@ elif sidebar_option == "Matchup Analysis":
 
         else:
             st.info("Unknown grouping option selected.")
-
 
         
