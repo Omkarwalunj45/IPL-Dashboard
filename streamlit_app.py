@@ -1752,7 +1752,7 @@ elif sidebar_option == "Matchup Analysis":
             if not df_list:
                 st.info(f"No {title.lower()} data available for this matchup.")
                 return
-
+            
             # Concatenate all formatted dataframes
             out = pd.concat(df_list, ignore_index=True)
             
@@ -1765,18 +1765,22 @@ elif sidebar_option == "Matchup Analysis":
             
             out = out.drop(columns=cols_to_drop, errors='ignore')
             
+            # CRITICAL FORMATTING: Convert to numeric, then int for specific cols, round others
+            for col in out.columns: out[col] = pd.to_numeric(out[col], errors='ignore')
+            for col in out.columns: out[col] = out[col].fillna(0).astype(int) if any(x in col.lower() for x in ['innings', 'runs', 'balls']) else (out[col].round(2) if out[col].dtype in ['float64', 'float32'] else out[col])
+            
             # Now normalize display column names
             out = normalize_display_columns(out)
-
+            
             # Ensure primary column name is uppercase & spaced
             primary_col_name_norm = str(primary_col_name).upper().replace('_', ' ')
-
+            
             # Put primary column first if present
             cols = out.columns.tolist()
             if primary_col_name_norm in cols:
                 new_order = [primary_col_name_norm] + [c for c in cols if c != primary_col_name_norm]
                 out = out[new_order]
-
+            
             # Basic light header styling
             table_styles = [
                 {"selector": "thead th", "props": [("background-color", header_color), ("color", "#000"), ("font-weight", "600")]},
