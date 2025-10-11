@@ -1161,12 +1161,14 @@ if option == "Batting":
 
 elif option == "Bowling":
     # Defensive: ensure bidf (summary idf for bowlers) and bpdf (ball-by-ball for bowlers) exist
-    try:
-        bidf
-        bpdf
-    except NameError:
-        st.error("Bowling view requires 'bidf' (bowling summary) and 'bpdf' (bowling ball-by-ball). Please load them.")
-        st.stop()
+    bpdf=df
+    bidf=bowlerstat(df)
+    # try:
+    #     bidf
+    #     bpdf
+    # except NameError:
+    #     st.error("Bowling view requires 'bidf' (bowling summary) and 'bpdf' (bowling ball-by-ball). Please load them.")
+    #     st.stop()
 
     # Normalize to DataFrame and ensure bowler column exists
     temp_df = as_dataframe(bidf)
