@@ -1841,8 +1841,8 @@ elif sidebar_option == "Matchup Analysis":
 
                 out=finalize_and_show(all_seasons, 'year', "Yearwise Performance", header_color="#efe6ff")
                                 # Add Batter and Bowler columns (in uppercase)
-                out['Batsman'] = str(batter_name).upper()
-                out['Bowler'] = str(bowler_name).upper()
+                out['Batsman'] = str(batter_name)
+                out['Bowler'] = str(bowler_name)
                 
                 # Move them to the front if you want them as leading columns
                 cols = ['Batsman', 'Bowler'] + [c for c in out.columns if c not in ['Batsman', 'Bowler']]
@@ -1880,8 +1880,8 @@ elif sidebar_option == "Matchup Analysis":
 
                 out=finalize_and_show(all_seasons, 'year', "Yearwise Performance", header_color="#efe6ff")
                                 # Add Batter and Bowler columns (in uppercase)
-                out['Batsman'] = str(batter_name).upper()
-                out['Bowler'] = str(bowler_name).upper()
+                out['Batsman'] = str(batter_name)
+                out['Bowler'] = str(bowler_name)
                 
                 # Move them to the front if you want them as leading columns
                 cols = ['Batsman', 'Bowler'] + [c for c in out.columns if c not in ['Batsman', 'Bowler']]
@@ -1919,8 +1919,8 @@ elif sidebar_option == "Matchup Analysis":
 
                 out=finalize_and_show(all_seasons, 'year', "Yearwise Performance", header_color="#efe6ff")
                                 # Add Batter and Bowler columns (in uppercase)
-                out['Batsman'] = str(batter_name).upper()
-                out['Bowler'] = str(bowler_name).upper()
+                out['Batsman'] = str(batter_name)
+                out['Bowler'] = str(bowler_name)
                 
                 # Move them to the front if you want them as leading columns
                 cols = ['Batsman', 'Bowler'] + [c for c in out.columns if c not in ['Batsman', 'Bowler']]
