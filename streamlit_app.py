@@ -1769,19 +1769,19 @@ elif sidebar_option == "Matchup Analysis":
             out=round_up_floats(out)
             st.write(out)
             
-            # Convert to numeric where possible
-            for col in out.columns:
-                out[col] = pd.to_numeric(out[col], errors='ignore')
+            # # Convert to numeric where possible
+            # for col in out.columns:
+            #     out[col] = pd.to_numeric(out[col], errors='ignore')
             
-            # Convert specific columns to int, round others to 2 decimals
-            for col in out.columns:
-                if any(x in col.lower() for x in ['innings', 'runs', 'balls']):
-                    out[col] = out[col].fillna(0).astype(int)
-                elif out[col].dtype in ['float64', 'float32', 'float']:
-                    out[col] = out[col].round(2)
+            # # Convert specific columns to int, round others to 2 decimals
+            # for col in out.columns:
+            #     if any(x in col.lower() for x in ['innings', 'runs', 'balls']):
+            #         out[col] = out[col].fillna(0).astype(int)
+            #     elif out[col].dtype in ['float64', 'float32', 'float']:
+            #         out[col] = out[col].round(2)
             
             # Replace None/NaN with 'sadh'
-            out = out.fillna('sadh')
+            out = out.fillna('-')
             
             # Capitalize first letter of each column name
             out.columns = [str(col).strip().capitalize() for col in out.columns]
