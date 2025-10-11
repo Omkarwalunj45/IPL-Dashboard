@@ -1787,7 +1787,7 @@ elif sidebar_option == "Matchup Analysis":
             out.columns = [str(col).strip().capitalize() for col in out.columns]
             
             # Ensure primary column name is also capitalized
-            # primary_col_name_norm = str(primary_col_name).strip().capitalize()
+            primary_col_name_norm = str(primary_col_name).strip().capitalize()
             
             # Put primary column first if present
             # cols = out.columns.tolist()
