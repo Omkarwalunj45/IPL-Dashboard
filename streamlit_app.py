@@ -617,12 +617,12 @@ def categorize_phase(over):
 def bowlerstat(df: pd.DataFrame) -> pd.DataFrame:
     """
     Bowler aggregation adapted to the df columns you provided.
-    Implements:
-      - legal_ball requires both wide & noball == 0
-      - dismissal resolution per user's rules (uses 'bat', 'p_bat', 'p_out', 'out', 'dismissal')
-      - bowler wicket credit only for non-runout-like dismissals
-      - computes per-delivery flags (is_dot, is_four, is_six, is_one, is_two, is_three)
-      - aggregates to bowler-level summary and returns bowl_rec
+
+    - Runs (for bowler) = sum of 'score' (or fallback) ONLY where byes == 0 and legbyes == 0
+    - BBI formatted as 'wkts/runs' (prefers match with max wkts, tie-breaker min runs)
+    - Bowler wicket credit only for non-run-out-like dismissals (per rules)
+    - legal_ball requires both wide & noball == 0
+    - Round float metrics to 2 decimals at the end
     """
     if df is None or len(df) == 0:
         return pd.DataFrame()
@@ -638,28 +638,33 @@ def bowlerstat(df: pd.DataFrame) -> pd.DataFrame:
         d = d.rename(columns={'bowl': 'bowler'})
     if 'ball_id' in d.columns and 'ball' not in d.columns:
         d = d.rename(columns={'ball_id': 'ball'})
+    # prefer explicit per-ball batsman runs field
     if 'batruns' in d.columns and 'batsman_runs' not in d.columns:
         d = d.rename(columns={'batruns': 'batsman_runs'})
     elif 'score' in d.columns and 'batsman_runs' not in d.columns:
         d = d.rename(columns={'score': 'batsman_runs'})
-    # ensure batsman_runs exists
     if 'batsman_runs' not in d.columns:
         d['batsman_runs'] = 0
 
-    # ---- total_runs fallback (runs conceded in delivery) ----
+    # ---- ensure numeric extras / score fields ----
+    # Score used for bowler runs calculation: prefer 'score' column if present else fallback to batsman_runs
+    d['score_num'] = pd.to_numeric(d.get('score', d.get('batsman_runs', 0)), errors='coerce').fillna(0).astype(int)
+
+    d['byes'] = pd.to_numeric(d.get('byes', 0), errors='coerce').fillna(0).astype(int)
+    d['legbyes'] = pd.to_numeric(d.get('legbyes', 0), errors='coerce').fillna(0).astype(int)
+    d['noball'] = pd.to_numeric(d.get('noball', 0), errors='coerce').fillna(0).astype(int)
+    d['wide']   = pd.to_numeric(d.get('wide', 0), errors='coerce').fillna(0).astype(int)
+
+    # Runs counted for bowler: score_num only when byes==0 and legbyes==0
+    d['runs_for_bowler'] = (d['score_num'] * ((d['byes'] == 0) & (d['legbyes'] == 0)).astype(int))
+
+    # total_runs fallback (useful for over-run aggregates)
     if 'bowlruns' in d.columns and 'total_runs' not in d.columns:
         d = d.rename(columns={'bowlruns': 'total_runs'})
     if 'total_runs' not in d.columns:
-        d['byes'] = pd.to_numeric(d.get('byes', 0), errors='coerce').fillna(0).astype(int)
-        d['legbyes'] = pd.to_numeric(d.get('legbyes', 0), errors='coerce').fillna(0).astype(int)
-        d['noball'] = pd.to_numeric(d.get('noball', 0), errors='coerce').fillna(0).astype(int)
-        d['wide'] = pd.to_numeric(d.get('wide', 0), errors='coerce').fillna(0).astype(int)
-        d['total_runs'] = (pd.to_numeric(d['batsman_runs'], errors='coerce').fillna(0).astype(int)
-                           + d['byes'] + d['legbyes'] + d['noball'] + d['wide'])
+        d['total_runs'] = pd.to_numeric(d.get('batsman_runs', 0), errors='coerce').fillna(0).astype(int) + d['byes'] + d['legbyes'] + d['noball'] + d['wide']
 
     # ---- legal ball: both wide & noball must be 0 ----
-    d['noball'] = pd.to_numeric(d.get('noball', 0), errors='coerce').fillna(0).astype(int)
-    d['wide']   = pd.to_numeric(d.get('wide', 0), errors='coerce').fillna(0).astype(int)
     d['legal_ball'] = ((d['noball'] == 0) & (d['wide'] == 0)).astype(int)
 
     # ---- per-delivery batsman_run flags ----
@@ -702,7 +707,6 @@ def bowlerstat(df: pd.DataFrame) -> pd.DataFrame:
     d['bowler_wkt'] = 0  # 1 if bowler credited for wicket
 
     # ---- dismissal resolution per match using rules you specified ----
-    # striker column in your df is 'bat'
     for match in d['match_id'].unique():
         idxs = d.index[d['match_id'] == match].tolist()
         idxs = sorted(idxs, key=lambda i: d.at[i, '__ball_sort__'])
@@ -756,11 +760,10 @@ def bowlerstat(df: pd.DataFrame) -> pd.DataFrame:
                 d.at[i, 'bowler_wkt'] = 0
 
     # ---- aggregate bowler-level stats using resolved bowler_wkt and flags ----
-    # Ensure bowler column exists
     if 'bowler' not in d.columns:
         d['bowler'] = d.get('bowl', None)
 
-    runs = d.groupby('bowler')['batsman_runs'].sum().reset_index().rename(columns={'batsman_runs': 'runs'})
+    runs = d.groupby('bowler')['runs_for_bowler'].sum().reset_index().rename(columns={'runs_for_bowler': 'runs'})
     innings = d.groupby('bowler')['match_id'].nunique().reset_index().rename(columns={'match_id': 'innings'})
     balls = d.groupby('bowler')['legal_ball'].sum().reset_index().rename(columns={'legal_ball': 'balls'})
     wkts = d.groupby('bowler')['bowler_wkt'].sum().reset_index().rename(columns={'bowler_wkt': 'wkts'})
@@ -768,17 +771,33 @@ def bowlerstat(df: pd.DataFrame) -> pd.DataFrame:
     fours = d.groupby('bowler')['is_four'].sum().reset_index().rename(columns={'is_four': 'fours'})
     sixes = d.groupby('bowler')['is_six'].sum().reset_index().rename(columns={'is_six': 'sixes'})
 
-    # three-wicket hauls & bbi (using bowler credit only)
+    # three-wicket hauls & bbi (we will compute formatted BBI below)
     dismissals_count = d.groupby(['bowler', 'match_id'])['bowler_wkt'].sum().reset_index(name='wkts_in_match')
     three_wicket_hauls = dismissals_count[dismissals_count['wkts_in_match'] >= 3].groupby('bowler').size().reset_index(name='three_wicket_hauls')
-    bbi = dismissals_count.groupby('bowler')['wkts_in_match'].max().reset_index().rename(columns={'wkts_in_match': 'bbi'})
+
+    # runs conceded per bowler per match (using runs_for_bowler rule)
+    runs_per_match = d.groupby(['bowler', 'match_id'])['runs_for_bowler'].sum().reset_index(name='runs_in_match')
+
+    # compute BBI: pick the match with highest wkts_in_match, tie-breaker lower runs_in_match
+    bbi_merge = dismissals_count.merge(runs_per_match, on=['bowler', 'match_id'], how='left')
+    # select best row per bowler
+    def choose_bbi(sub):
+        if sub.empty:
+            return pd.Series({'bbi_wkts': np.nan, 'bbi_runs': np.nan})
+        sub_sorted = sub.sort_values(by=['wkts_in_match', 'runs_in_match'], ascending=[False, True]).reset_index(drop=True)
+        return pd.Series({'bbi_wkts': int(sub_sorted.loc[0, 'wkts_in_match']), 'bbi_runs': int(sub_sorted.loc[0, 'runs_in_match'])})
+    bbi_choice = bbi_merge.groupby('bowler').apply(choose_bbi).reset_index()
+    # create formatted BBI string "w/r"
+    if not bbi_choice.empty:
+        bbi_choice['BBI'] = bbi_choice.apply(lambda r: f"{int(r['bbi_wkts'])}/{int(r['bbi_runs'])}" if (not pd.isna(r['bbi_wkts']) and not pd.isna(r['bbi_runs'])) else np.nan, axis=1)
+    else:
+        bbi_choice = pd.DataFrame(columns=['bowler', 'bbi_wkts', 'bbi_runs', 'BBI'])
 
     # ---- over/maiden logic ----
     if 'over' in d.columns:
         try:
             d['over_num'] = pd.to_numeric(d['over'], errors='coerce').fillna(0).astype(int)
         except Exception:
-            # if over is like '12.3', extract integer part
             d['over_num'] = d['over'].astype(str).str.split('.').str[0].fillna('0').astype(int)
     else:
         d['over_num'] = 0
@@ -807,12 +826,10 @@ def bowlerstat(df: pd.DataFrame) -> pd.DataFrame:
         if df_pg.empty:
             return pd.DataFrame({'bowler': []})
         pivoted = df_pg.pivot(index='bowler', columns='phase', values=metric).fillna(0)
-        # ensure consistent phase columns and friendly names
         expected_phases = ['Powerplay', 'Middle 1', 'Middle 2', 'Death', 'Unknown']
         for ph in expected_phases:
             if ph not in pivoted.columns:
                 pivoted[ph] = 0
-        # rename to metric_phase columns
         pivoted = pivoted.rename(columns={ph: f"{metric}_{ph.replace(' ', '')}" for ph in pivoted.columns})
         pivoted = pivoted.reset_index()
         return pivoted
@@ -823,11 +840,10 @@ def bowlerstat(df: pd.DataFrame) -> pd.DataFrame:
     pdot = pivot_metric(phase_group, 'phase_dots')
     pi = pivot_metric(phase_group, 'phase_innings')
 
-    # merge phase pivots
     phase_df = pb.merge(pr, on='bowler', how='outer').merge(pw, on='bowler', how='outer') \
                  .merge(pdot, on='bowler', how='outer').merge(pi, on='bowler', how='outer').fillna(0)
 
-    # ---- Mega Over detection (consecutive overs by same bowler) ----
+    # ---- Mega Over detection ----
     df_sorted = d.sort_values(['match_id', '__ball_sort__']).reset_index(drop=True).copy()
     df_sorted['ball_str'] = df_sorted.get('ball', df_sorted['__ball_sort__']).astype(str)
     df_sorted['frac'] = df_sorted['ball_str'].str.split('.').str[1].fillna('0')
@@ -838,7 +854,7 @@ def bowlerstat(df: pd.DataFrame) -> pd.DataFrame:
     df_sorted['Mega_Over'] = (df_sorted['frac_int'] == 1) & (df_sorted['prev_bowler_same'])
     mega_over_count = df_sorted[df_sorted['Mega_Over']].groupby('bowler').size().reset_index(name='Mega_Over_Count')
 
-    # ---- combine all components into bowl_rec ----
+    # ---- combine components into bowl_rec ----
     bowl_rec = innings.merge(balls, on='bowler', how='outer') \
                       .merge(runs, on='bowler', how='outer') \
                       .merge(wkts, on='bowler', how='outer') \
@@ -847,14 +863,18 @@ def bowlerstat(df: pd.DataFrame) -> pd.DataFrame:
                       .merge(dots, on='bowler', how='outer') \
                       .merge(three_wicket_hauls, on='bowler', how='left') \
                       .merge(maiden_overs_count, on='bowler', how='left') \
-                      .merge(bbi, on='bowler', how='left') \
+                      .merge(bbi_choice[['bowler', 'bbi_wkts', 'bbi_runs', 'BBI']] if not bbi_choice.empty else bbi_choice, on='bowler', how='left') \
                       .merge(phase_df, on='bowler', how='left') \
                       .merge(mega_over_count, on='bowler', how='left')
 
-    # fill defaults for some integer columns
-    for c in ['three_wicket_hauls', 'maiden_overs', 'Mega_Over_Count', 'bbi']:
+    # fill defaults for integer columns
+    for c in ['three_wicket_hauls', 'maiden_overs', 'Mega_Over_Count', 'bbi_wkts', 'bbi_runs']:
         if c in bowl_rec.columns:
             bowl_rec[c] = bowl_rec[c].fillna(0).astype(int)
+
+    # If BBI string missing, fill with NaN
+    if 'BBI' in bowl_rec.columns:
+        bowl_rec['BBI'] = bowl_rec['BBI'].fillna(np.nan)
 
     # debut / final season
     if 'season' in d.columns:
@@ -870,7 +890,7 @@ def bowlerstat(df: pd.DataFrame) -> pd.DataFrame:
         if col in bowl_rec.columns:
             bowl_rec[col] = pd.to_numeric(bowl_rec[col], errors='coerce').fillna(0)
 
-    # derived metrics
+    # derived metrics (guard divide-by-zero)
     bowl_rec['dot%'] = bowl_rec.apply(lambda r: (r['dots'] / r['balls'] * 100) if r['balls'] > 0 else np.nan, axis=1)
     bowl_rec['avg'] = bowl_rec.apply(lambda r: (r['runs'] / r['wkts']) if r['wkts'] > 0 else np.nan, axis=1)
     bowl_rec['sr'] = bowl_rec.apply(lambda r: (r['balls'] / r['wkts']) if r['wkts'] > 0 else np.nan, axis=1)
@@ -884,11 +904,22 @@ def bowlerstat(df: pd.DataFrame) -> pd.DataFrame:
     bowl_rec['BPD'] = bowl_rec.apply(lambda r: (r['balls'] / r['wkts']) if r['wkts'] > 0 else np.nan, axis=1)
     bowl_rec['BP6'] = bowl_rec.apply(lambda r: (r['balls'] / r['sixes']) if r['sixes'] > 0 else np.nan, axis=1)
 
-    # over-wise run counts
-    overwise_runs = d.groupby(['bowler', 'match_id', 'over_num'])['total_runs'].sum().reset_index()
-    ten_run_overs = overwise_runs[overwise_runs['total_runs'] >= 10].groupby('bowler').size().reset_index(name='10_run_overs')
-    seven_plus_overs = overwise_runs[overwise_runs['total_runs'] >= 7].groupby('bowler').size().reset_index(name='7_plus_run_overs')
-    six_minus_overs = overwise_runs[overwise_runs['total_runs'] <= 6].groupby('bowler').size().reset_index(name='6_minus_run_overs')
+    # over-wise run counts (already computed earlier)
+    overwise_runs = d.groupby(['bowler', 'match_id'])['total_runs'].sum().reset_index()
+    ten_run_overs = d.groupby(['bowler', 'match_id']).apply(lambda g: (g.groupby('over_num')['total_runs'].sum() >= 10).sum()).reset_index(name='10_run_overs')
+    seven_plus_overs = d.groupby(['bowler', 'match_id']).apply(lambda g: (g.groupby('over_num')['total_runs'].sum() >= 7).sum()).reset_index(name='7_plus_run_overs')
+    six_minus_overs = d.groupby(['bowler', 'match_id']).apply(lambda g: (g.groupby('over_num')['total_runs'].sum() <= 6).sum()).reset_index(name='6_minus_run_overs')
+
+    # collapse to bowler-level counts
+    def collapse_counts(df_counts):
+        if df_counts.empty:
+            return pd.DataFrame(columns=['bowler', df_counts.columns[-1]])
+        agg = df_counts.groupby('bowler').sum().reset_index()
+        return agg
+
+    ten_run_overs = collapse_counts(ten_run_overs)
+    seven_plus_overs = collapse_counts(seven_plus_overs)
+    six_minus_overs = collapse_counts(six_minus_overs)
 
     bowl_rec = bowl_rec.merge(ten_run_overs, on='bowler', how='left')
     bowl_rec = bowl_rec.merge(seven_plus_overs, on='bowler', how='left')
@@ -904,10 +935,17 @@ def bowlerstat(df: pd.DataFrame) -> pd.DataFrame:
     else:
         bowl_rec['overs'] = "0.0"
 
-    # final cleanup
-    bowl_rec = bowl_rec[bowl_rec['bowler'].notna()]
-    bowl_rec.reset_index(drop=True, inplace=True)
+    # final cleanup: keep rows with bowler name
+    bowl_rec = bowl_rec[bowl_rec['bowler'].notna()].reset_index(drop=True)
+
+    # Round float columns to 2 decimals for presentation
+    float_cols = ['econ', 'avg', 'sr', 'dot%', 'WPI', 'DPI', 'RPI', 'bdry%', 'BPB', 'BPD', 'BP6']
+    for col in float_cols:
+        if col in bowl_rec.columns:
+            bowl_rec[col] = bowl_rec[col].round(2)
+
     return bowl_rec
+
 
 
 # -----------------------
