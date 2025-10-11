@@ -1846,6 +1846,7 @@ elif sidebar_option == "Matchup Analysis":
                 
                 # Move them to the front if you want them as leading columns
                 cols = ['Batsman', 'Bowler'] + [c for c in out.columns if c not in ['Batsman', 'Bowler']]
+                out = out[cols]
                 csv = out.to_csv(index=False)
                 st.download_button(
                     label="Download raw matchup rows (CSV)",
@@ -1883,7 +1884,8 @@ elif sidebar_option == "Matchup Analysis":
                 out['Bowler'] = str(bowler_name).upper()
                 
                 # Move them to the front if you want them as leading columns
-                cols = ['Batsman', 'Bowler'] + [c for c in out.columns if c not in ['Batsman', 'Bowler']]
+               cols = ['Batsman', 'Bowler'] + [c for c in out.columns if c not in ['Batsman', 'Bowler']]
+               out = out[cols]
                 csv = out.to_csv(index=False)
                 st.download_button(
                     label="Download raw matchup rows (CSV)",
@@ -1922,6 +1924,8 @@ elif sidebar_option == "Matchup Analysis":
                 
                 # Move them to the front if you want them as leading columns
                 cols = ['Batsman', 'Bowler'] + [c for c in out.columns if c not in ['Batsman', 'Bowler']]
+                cols = ['Batsman', 'Bowler'] + [c for c in out.columns if c not in ['Batsman', 'Bowler']]
+                out = out[cols]
                 csv = out.to_csv(index=False)
                 st.download_button(
                     label="Download raw matchup rows (CSV)",
@@ -1955,10 +1959,8 @@ elif sidebar_option == "Matchup Analysis":
 
                 finalize_and_show(all_inns, 'inning', "Inningwise Performance", header_color="#e6f7ff")
                 # Add Batter and Bowler columns (in uppercase)
-                out['Batsman'] = str(batter_name).upper()
-                out['Bowler'] = str(bowler_name).upper()
-                
-                # Move them to the front if you want them as leading columns
+                out['Batsman'] = str(batter_name)
+                out['Bowler'] = str(bowler_name)
                 cols = ['Batsman', 'Bowler'] + [c for c in out.columns if c not in ['Batsman', 'Bowler']]
                 out = out[cols]
                 csv = out.to_csv(index=False)
