@@ -1255,12 +1255,7 @@ if option == "Batting":
 
 
 elif option == "Bowling":
-    # Defensive: ensure raw ball-by-ball df exists
-    try:
-        df
-    except NameError:
-        st.error("Bowling view requires the raw ball-by-ball DataFrame 'df'. Please load it.")
-        st.stop()
+    # Defensive: ensure raw ball-by-ball df exist
 
     # bpdf is the ball-by-ball (same as df)
     bpdf = as_dataframe(df)
