@@ -1266,7 +1266,7 @@ if option == "Batting":
                     {"selector": "tbody tr:nth-child(even)", "props": [("background-color", "#f7fdff")]},
                 ]
         
-                st.markdown("### Venuewise Performance (Batting)")
+                st.markdown("### Venuewise Performance")
                 st.dataframe(result_df.style.set_table_styles(venue_table_styles), use_container_width=True)
             else:
                 st.info("No venuewise batting summary available for this player.")
@@ -1595,7 +1595,7 @@ else:
             {"selector": "tbody tr:nth-child(even)", "props": [("background-color", "#f7fbff")]},
         ]
 
-        st.markdown("### Venuewise Performance (Bowling)")
+        st.markdown("### Venuewise Performance")
         st.dataframe(result_df.style.set_table_styles(venue_table_styles), use_container_width=True)
     else:
         st.info("No venuewise bowling summary available for this player.")
