@@ -91,7 +91,7 @@ def categorize_phase(over_val):
 # -----------------------
 # cumulator: safe one-player summary (never returns None)
 # -----------------------
-def Custom(df: pd.DataFrame) -> pd.DataFrame:
+def cumulator(df: pd.DataFrame) -> pd.DataFrame:
     """
     Batting summary builder with:
       - legal_ball requires both wide & noball == 0
