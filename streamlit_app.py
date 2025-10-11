@@ -1757,7 +1757,7 @@ elif sidebar_option == "Matchup Analysis":
             
             # Concatenate all formatted dataframes
             out = pd.concat(df_list, ignore_index=True)
-            
+            st.write(out)
             # Remove batter and bowler columns if they exist
             cols_to_drop = []
             for col in out.columns:
@@ -1767,6 +1767,7 @@ elif sidebar_option == "Matchup Analysis":
             
             out = out.drop(columns=cols_to_drop, errors='ignore')
             out=round_up_floats(out)
+            st.write(out)
             # CRITICAL FORMATTING: Convert to numeric, then int for specific cols, round others
             for col in out.columns: 
                 out[col] = pd.to_numeric(out[col], errors='ignore')
