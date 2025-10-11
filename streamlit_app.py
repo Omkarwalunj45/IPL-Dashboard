@@ -1661,22 +1661,6 @@ elif sidebar_option == "Matchup Analysis":
             else:
                 return pd.DataFrame(x)
 
-    try:
-        safe_get_col
-    except NameError:
-        def safe_get_col(df_local, candidates, default=None):
-            for c in candidates:
-                if c in df_local.columns:
-                    return c
-            return default
-
-    # Ensure df exists
-    try:
-        df
-    except NameError:
-        st.error("Raw ball-by-ball DataFrame 'df' not found. Load data before using Matchup Analysis.")
-        st.stop()
-
     bdf = as_dataframe(df)  # work on a copy
 
     # Detect column names in your data
