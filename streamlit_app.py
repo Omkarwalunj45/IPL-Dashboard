@@ -1293,10 +1293,9 @@ elif option == "Bowling":
 
         # top metrics mapping for bowlers (ordered)
         top_metric_mapping = {
-            "Overs": ["OVERS", "OVERS "],
+            "Innings": ["INNINGS", "MATCHES"],
             "Runs": ["RUNS", "RUNS CONCEDED"],
             "Wickets": ["WKTS", "WICKETS", "WICKETS "],
-            "Innings": ["INNINGS", "MATCHES"],
             "Econ": ["ECON", "ECONOMY"],
             "Average": ["AVG", "AVERAGE"],
             "Strike Rate": ["SR", "STRIKE RATE"],
