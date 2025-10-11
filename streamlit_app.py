@@ -1787,23 +1787,25 @@ elif sidebar_option == "Matchup Analysis":
             out.columns = [str(col).strip().capitalize() for col in out.columns]
             
             # Ensure primary column name is also capitalized
-            primary_col_name_norm = str(primary_col_name).strip().capitalize()
+            # primary_col_name_norm = str(primary_col_name).strip().capitalize()
             
             # Put primary column first if present
-            cols = out.columns.tolist()
-            if primary_col_name_norm in cols:
-                new_order = [primary_col_name_norm] + [c for c in cols if c != primary_col_name_norm]
-                out = out[new_order]
+            # cols = out.columns.tolist()
+            # if primary_col_name_norm in cols:
+            #     new_order = [primary_col_name_norm] + [c for c in cols if c != primary_col_name_norm]
+            #     out = out[new_order]
             
             # Table styling
-            table_styles = [
-                {"selector": "thead th", "props": [("background-color", header_color), ("color", "#000"), ("font-weight", "600")]},
-                {"selector": "tbody tr:nth-child(odd)", "props": [("background-color", "#ffffff")]},
-                {"selector": "tbody tr:nth-child(even)", "props": [("background-color", "#f7f7fb")]},
-            ]
+            # table_styles = [
+            #     {"selector": "thead th", "props": [("background-color", header_color), ("color", "#000"), ("font-weight", "600")]},
+            #     {"selector": "tbody tr:nth-child(odd)", "props": [("background-color", "#ffffff")]},
+            #     {"selector": "tbody tr:nth-child(even)", "props": [("background-color", "#f7f7fb")]},
+            # ]
             
             st.markdown(f"### {title}")
-            st.dataframe(out.style.set_table_styles(table_styles), use_container_width=True)
+            st.write(out)
+            # st.dataframe(out.style.set_table_styles(table_styles), use_container_width=True)
+            
 
 
         # -------------------
