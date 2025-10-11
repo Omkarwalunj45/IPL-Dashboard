@@ -33,6 +33,7 @@ def rename_rcb(df: pd.DataFrame) -> pd.DataFrame:
     return d
 df = rename_rcb(df)
 df['is_wicket'] = df['out'].astype(int)
+df['venue']=df['ground']
 
 
 # -----------------------
@@ -1207,6 +1208,70 @@ if option == "Batting":
                 st.markdown("### Yearwise Performance")
                 st.dataframe(result_df.style.set_table_styles(year_table_styles), use_container_width=True)
 
+        # -------------------------
+        # Venuewise Performance (Batting) — drop in after Yearwise
+        # ------------
+        
+        bpdf = as_dataframe(df)  # raw ball-by-ball
+        bat_col = 'batsman' if 'batsman' in bpdf.columns else ('bat' if 'bat' in bpdf.columns else None)
+        
+        venue_candidates = ['ground', 'venue', 'stadium', 'ground_name']
+        venue_col = safe_get_col(bpdf, venue_candidates, default=None)
+        
+        if bat_col is None:
+            st.info("Venuewise batting breakdown not available (missing 'bat'/'batsman' column).")
+        elif venue_col is None:
+            st.info("Venuewise batting breakdown not available (missing ground/venue/stadium column).")
+        else:
+            tdf = bpdf[bpdf[bat_col] == player_name].copy()
+            unique_venues = sorted(tdf[venue_col].dropna().unique().tolist())
+            all_venues = []
+            for venue in unique_venues:
+                temp = tdf[tdf[venue_col] == venue].copy()
+                if temp.empty:
+                    continue
+                temp_summary = cumulator(temp)
+                temp_summary = as_dataframe(temp_summary)
+                if temp_summary.empty:
+                    continue
+                temp_summary['VENUE'] = venue
+                # make VENUE first
+                cols = temp_summary.columns.tolist()
+                if 'VENUE' in temp_summary.columns:
+                    temp_summary = temp_summary[['VENUE'] + [c for c in cols if c != 'VENUE']]
+                all_venues.append(temp_summary)
+        
+            if all_venues:
+                result_df = pd.concat(all_venues, ignore_index=True).drop(columns=['batsman', 'debut_year', 'final_year'], errors='ignore')
+                # uppercase and space format, normalize middle phase names
+                new_cols = []
+                for col in result_df.columns:
+                    cname = str(col).upper().replace('_', ' ')
+                    cname = cname.replace('MIDDLE1', 'MIDDLE 1').replace('MIDDLE2', 'MIDDLE 2')
+                    new_cols.append(cname)
+                result_df.columns = new_cols
+        
+                # safe numeric casts
+                for c in ['RUNS', 'HUNDREDS', 'FIFTIES', '30S', 'HIGHEST SCORE']:
+                    if c in result_df.columns:
+                        result_df[c] = pd.to_numeric(result_df[c], errors='coerce').fillna(0).astype(int)
+        
+                result_df = round_up_floats(result_df)
+        
+                # Styling: reuse light-blue style (or change color hex if you prefer)
+                venue_header_color = "#e6f7ff"
+                venue_table_styles = [
+                    {"selector": "thead th", "props": [("background-color", venue_header_color), ("color", "#000"), ("font-weight", "600")]},
+                    {"selector": "tbody tr:nth-child(odd)", "props": [("background-color", "#ffffff")]},
+                    {"selector": "tbody tr:nth-child(even)", "props": [("background-color", "#f7fdff")]},
+                ]
+        
+                st.markdown("### Venuewise Performance (Batting)")
+                st.dataframe(result_df.style.set_table_styles(venue_table_styles), use_container_width=True)
+            else:
+                st.info("No venuewise batting summary available for this player.")
+
+
         # Inningwise
         inning_col = 'inns' if 'inns' in df.columns else ('inning' if 'inning' in df.columns else None)
         if inning_col:
@@ -1479,6 +1544,62 @@ else:
         st.dataframe(result_df.style.set_table_styles(year_table_styles), use_container_width=True)
     else:
         st.info("No yearwise bowling summary available for this player.")
+
+# -------------------------
+# Venuewise Performance (Bowling) — drop in after Yearwise
+
+bpdf = as_dataframe(df)  # raw ball-by-ball
+# actual bowler column in your df is 'bowl' (bowlerstat normalizes it internally)
+bowler_col = safe_get_col(bpdf, ['bowl', 'bowler'], default=None)
+
+venue_candidates = ['ground', 'venue', 'stadium', 'ground_name']
+venue_col = safe_get_col(bpdf, venue_candidates, default=None)
+
+if bowler_col is None:
+    st.info("Venuewise bowling breakdown not available (missing 'bowl'/'bowler' column).")
+elif venue_col is None:
+    st.info("Venuewise bowling breakdown not available (missing ground/venue/stadium column).")
+else:
+    tdf = bpdf[bpdf[bowler_col] == player_name].copy()
+    unique_venues = sorted(tdf[venue_col].dropna().unique().tolist())
+    all_venues = []
+    for venue in unique_venues:
+        temp = tdf[tdf[venue_col] == venue].copy()
+        if temp.empty:
+            continue
+        temp_summary = bowlerstat(temp)
+        temp_summary = as_dataframe(temp_summary)
+        if temp_summary.empty:
+            continue
+        temp_summary['VENUE'] = venue.upper()
+        # ensure VENUE first
+        cols = temp_summary.columns.tolist()
+        if 'VENUE' in temp_summary.columns:
+            temp_summary = temp_summary[['VENUE'] + [c for c in cols if c != 'VENUE']]
+        all_venues.append(temp_summary)
+
+    if all_venues:
+        result_df = pd.concat(all_venues, ignore_index=True).drop(columns=['bowler'], errors='ignore')
+        result_df.columns = [str(col).upper().replace('_', ' ') for col in result_df.columns]
+        # safe numeric casts
+        for c in ['RUNS', 'WKTS', 'BALLS', 'OVERS', 'ECON', 'AVG']:
+            if c in result_df.columns:
+                result_df[c] = pd.to_numeric(result_df[c], errors='coerce').fillna(0)
+        result_df = round_up_floats(result_df)
+
+        # Styling: light blue/teal for venue
+        venue_header_color = "#e6f7ff"
+        venue_table_styles = [
+            {"selector": "thead th", "props": [("background-color", venue_header_color), ("color", "#000"), ("font-weight", "600")]},
+            {"selector": "tbody tr:nth-child(odd)", "props": [("background-color", "#ffffff")]},
+            {"selector": "tbody tr:nth-child(even)", "props": [("background-color", "#f7fbff")]},
+        ]
+
+        st.markdown("### Venuewise Performance (Bowling)")
+        st.dataframe(result_df.style.set_table_styles(venue_table_styles), use_container_width=True)
+    else:
+        st.info("No venuewise bowling summary available for this player.")
+
 
 # -------------------------
 # Inningwise Performance
