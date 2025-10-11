@@ -1645,6 +1645,222 @@ else:
         st.info("No inningwise bowling summary available for this player.")
 
 
+elif sidebar_option == "Matchup Analysis":
+
+    st.header("Matchup Analysis")
+
+    # Defensive helpers (use existing ones if present)
+    try:
+        as_dataframe
+    except NameError:
+        def as_dataframe(x):
+            if isinstance(x, pd.Series):
+                return x.to_frame().T.reset_index(drop=True)
+            elif isinstance(x, pd.DataFrame):
+                return x.copy()
+            else:
+                return pd.DataFrame(x)
+
+    try:
+        safe_get_col
+    except NameError:
+        def safe_get_col(df_local, candidates, default=None):
+            for c in candidates:
+                if c in df_local.columns:
+                    return c
+            return default
+
+    # Ensure df exists
+    try:
+        df
+    except NameError:
+        st.error("Raw ball-by-ball DataFrame 'df' not found. Load data before using Matchup Analysis.")
+        st.stop()
+
+    bdf = as_dataframe(df)  # work on a copy
+
+    # Detect column names in your data
+    batter_col = safe_get_col(bdf, ['bat', 'batsman'], default=None)
+    bowler_col = safe_get_col(bdf, ['bowl', 'bowler'], default=None)
+    match_col = safe_get_col(bdf, ['p_match', 'match_id'], default=None)
+    year_col = safe_get_col(bdf, ['season', 'year'], default=None)
+    inning_col = safe_get_col(bdf, ['inns', 'inning'], default=None)
+    venue_col = safe_get_col(bdf, ['ground', 'venue', 'stadium', 'ground_name'], default=None)
+
+    if batter_col is None or bowler_col is None:
+        st.error("Dataframe must contain batter and bowler columns (e.g. 'bat' and 'bowl').")
+        st.stop()
+
+    # Build unique player lists (filtering out nulls/"0")
+    unique_batters = sorted([x for x in pd.unique(bdf[batter_col].dropna()) if str(x).strip() not in ("", "0")])
+    unique_bowlers  = sorted([x for x in pd.unique(bdf[bowler_col].dropna())  if str(x).strip() not in ("", "0")])
+
+    if not unique_batters or not unique_bowlers:
+        st.warning("No batters or bowlers found in the dataset.")
+        st.stop()
+
+    # Player selectors
+    batter_name = st.selectbox("Select a Batter", unique_batters, index=0)
+    bowler_name = st.selectbox("Select a Bowler", unique_bowlers, index=0)
+
+    # Grouping option
+    grouping_option = st.selectbox("Group By", ["Year", "Match", "Venue", "Inning"])
+
+    # Raw matchup rows (for download and sanity)
+    matchup_df = bdf[(bdf[batter_col] == batter_name) & (bdf[bowler_col] == bowler_name)].copy()
+
+    if matchup_df.empty:
+        st.warning("No data available for the selected matchup.")
+    else:
+        # Normalize numeric fields if present (defensive)
+        for col in ['batsman_runs', 'batruns', 'score', 'bowlruns', 'total_runs']:
+            if col in matchup_df.columns:
+                try:
+                    matchup_df[col] = pd.to_numeric(matchup_df[col], errors='coerce')
+                except Exception:
+                    pass
+
+        # Download button for raw matchup rows
+        csv = matchup_df.to_csv(index=False)
+        st.download_button(
+            label="Download raw matchup rows (CSV)",
+            data=csv,
+            file_name=f"{str(batter_name)}_vs_{str(bowler_name)}_matchup.csv",
+            mime="text/csv"
+        )
+
+        # Helper to drop and format result before display
+        def finalize_and_show(df_list, primary_col_name, title, header_color="#efe6ff"):
+            # df_list: list of DataFrames already prepared (each with primary_col_name present)
+            if not df_list:
+                st.info(f"No {title.lower()} data available for this matchup.")
+                return
+
+            out = pd.concat(df_list, ignore_index=True).drop(columns=[batter_col, bowler_col], errors='ignore')
+            # numeric casts for common columns
+            for c in ['runs', 'dismissals', 'balls', 'wkts', 'overs']:
+                if c in out.columns:
+                    out[c] = pd.to_numeric(out[c], errors='coerce').fillna(0)
+            out.columns = [col.upper().replace('_', ' ') for col in out.columns]
+
+            # Ensure primary column is first (already inserted by callers)
+            cols = out.columns.tolist()
+            if primary_col_name not in cols:
+                # if not present, just show dataframe
+                st.dataframe(out, use_container_width=True)
+                return
+
+            # reorder putting primary_col_name first
+            new_order = [primary_col_name] + [c for c in cols if c != primary_col_name]
+            out = out[new_order]
+
+            # basic light header color styling
+            table_styles = [
+                {"selector": "thead th", "props": [("background-color", header_color), ("color", "#000"), ("font-weight", "600")]},
+                {"selector": "tbody tr:nth-child(odd)", "props": [("background-color", "#ffffff")]},
+                {"selector": "tbody tr:nth-child(even)", "props": [("background-color", "#f7f7fb")]},
+            ]
+            st.markdown(f"### {title}")
+            st.dataframe(out.style.set_table_styles(table_styles), use_container_width=True)
+
+        # -------------------
+        # Year grouping
+        # -------------------
+        if grouping_option == "Year":
+            if year_col is None:
+                st.info("Year/season column not detected in dataset.")
+            else:
+                tdf = matchup_df.copy()
+                seasons = sorted(tdf[year_col].dropna().unique().tolist())
+                all_seasons = []
+                for s in seasons:
+                    temp = tdf[tdf[year_col] == s].copy()
+                    if temp.empty:
+                        continue
+                    temp_summary = cumulator(temp)  # expects to return per-player summary rows
+                    temp_summary = as_dataframe(temp_summary)
+                    if temp_summary.empty:
+                        continue
+                    temp_summary.insert(0, 'YEAR', s)
+                    all_seasons.append(temp_summary)
+
+                # show results with YEAR as first column
+                finalize_and_show(all_seasons, 'YEAR', "Yearwise Performance", header_color="#efe6ff")
+
+        # -------------------
+        # Match grouping
+        # -------------------
+        elif grouping_option == "Match":
+            if match_col is None:
+                st.info("Match ID column not detected in dataset (expected 'p_match' or 'match_id').")
+            else:
+                tdf = matchup_df.copy()
+                match_ids = sorted(tdf[match_col].dropna().unique().tolist())
+                all_matches = []
+                for m in match_ids:
+                    temp = tdf[tdf[match_col] == m].copy()
+                    if temp.empty:
+                        continue
+                    temp_summary = cumulator(temp)
+                    temp_summary = as_dataframe(temp_summary)
+                    if temp_summary.empty:
+                        continue
+                    temp_summary.insert(0, 'MATCH ID', m)
+                    all_matches.append(temp_summary)
+
+                finalize_and_show(all_matches, 'MATCH ID', "Matchwise Performance", header_color="#e6f7ff")
+
+        # -------------------
+        # Venue grouping
+        # -------------------
+        elif grouping_option == "Venue":
+            if venue_col is None:
+                st.info("Venue/ground column not detected in dataset.")
+            else:
+                tdf = matchup_df.copy()
+                venues = sorted(tdf[venue_col].dropna().unique().tolist())
+                all_venues = []
+                for v in venues:
+                    temp = tdf[tdf[venue_col] == v].copy()
+                    if temp.empty:
+                        continue
+                    temp_summary = cumulator(temp)
+                    temp_summary = as_dataframe(temp_summary)
+                    if temp_summary.empty:
+                        continue
+                    temp_summary.insert(0, 'VENUE', v)
+                    all_venues.append(temp_summary)
+
+                finalize_and_show(all_venues, 'VENUE', "Venuewise Performance", header_color="#e6f7ff")
+
+        # -------------------
+        # Inning grouping
+        # -------------------
+        elif grouping_option == "Inning":
+            if inning_col is None:
+                st.info("Inning column not detected in dataset (expected 'inns' or 'inning').")
+            else:
+                tdf = matchup_df.copy()
+                innings = sorted(tdf[inning_col].dropna().unique().tolist())
+                all_inns = []
+                for inn in innings:
+                    temp = tdf[tdf[inning_col] == inn].copy()
+                    if temp.empty:
+                        continue
+                    temp_summary = cumulator(temp)
+                    temp_summary = as_dataframe(temp_summary)
+                    if temp_summary.empty:
+                        continue
+                    temp_summary.insert(0, 'INNING', inn)
+                    all_inns.append(temp_summary)
+
+                finalize_and_show(all_inns, 'INNING', "Inningwise Performance", header_color="#e6f7ff")
+
+        else:
+            st.info("Unknown grouping option selected.")
+
+
+
 
 
         
