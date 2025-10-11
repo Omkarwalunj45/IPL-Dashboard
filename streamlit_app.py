@@ -1817,8 +1817,8 @@ elif sidebar_option == "Matchup Analysis":
                         continue
                     temp_summary = cumulator(temp)
                     temp_summary=round_up_floats(temp_summary)
-                    st.write(temp_summary)
-                    temp_summary = as_dataframe(temp_summary)
+                    # st.write(temp_summary)
+                    # temp_summary = as_dataframe(temp_summary)
                     if temp_summary.empty:
                         continue
                     # FORMAT BEFORE ADDING TO LIST
