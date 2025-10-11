@@ -1646,6 +1646,8 @@ if sidebar_option == "Player Profile":
 
 elif sidebar_option == "Matchup Analysis":
 
+    st.header("Matchup Analysis")
+
     # Defensive helper fallbacks (use your existing ones if present)
     try:
         as_dataframe
@@ -1657,6 +1659,22 @@ elif sidebar_option == "Matchup Analysis":
                 return x.copy()
             else:
                 return pd.DataFrame(x)
+
+    try:
+        safe_get_col
+    except NameError:
+        def safe_get_col(df_local, candidates, default=None):
+            for c in candidates:
+                if c in df_local.columns:
+                    return c
+            return default
+
+    # Ensure df exists
+    try:
+        df
+    except NameError:
+        st.error("Raw ball-by-ball DataFrame 'df' not found. Load data before using Matchup Analysis.")
+        st.stop()
 
     bdf = as_dataframe(df)
 
@@ -1710,49 +1728,36 @@ elif sidebar_option == "Matchup Analysis":
             mime="text/csv"
         )
 
+        # Helper: Apply formatting to individual summary dataframe
+        def format_summary_df(temp_summary):
+            """Format a single summary dataframe with proper types"""
+            df = temp_summary.copy()
+            
+            # First, identify and convert integer columns (before normalizing column names)
+            for col in df.columns:
+                col_lower = str(col).lower()
+                # Check if column name contains 'innings', 'runs', or 'balls'
+                if any(keyword in col_lower for keyword in ['innings', 'inning', 'runs', 'balls', 'wickets', 'wkts', 'dismissals', 'matches', 'fours', 'sixes', 'dots']):
+                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+            
+            # Round all other numeric columns to 2 decimals
+            numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+            for nc in numeric_cols:
+                # Skip if already integer type
+                if df[nc].dtype == int:
+                    continue
+                try:
+                    df[nc] = df[nc].round(2)
+                except Exception:
+                    pass
+            
+            return df
+
         # Helper: convert column names to display form (UPPER + spaces)
         def normalize_display_columns(df_in):
             df = df_in.copy()
             df.columns = [str(col).upper().replace('_', ' ') for col in df.columns]
             return df
-
-        # Helper: coerce specific count columns to int where present
-        def coerce_int_counts(df_out):
-            # Expanded list to catch all possible integer columns
-            int_candidates = [
-                'INNINGS', 'INNING', 'RUNS', 'BALLS', 'WKTS', 'DISMISSALS', 
-                'MATCHES', 'MATCH ID', 'BATSMAN RUNS', 'BATRUNS', 'BOWLRUNS',
-                'TOTAL RUNS', 'FOURS', '4S', 'SIXES', '6S', 'DOTS', 'DOT BALLS',
-                'WICKETS', 'YEAR', 'SEASON'
-            ]
-            for ic in int_candidates:
-                if ic in df_out.columns:
-                    df_out[ic] = pd.to_numeric(df_out[ic], errors='coerce').fillna(0).astype(int)
-            return df_out
-
-        # Helper: round ALL numeric floats to 2 decimals (exclude integer cols)
-        def round_numeric_cols(df_out):
-            # Integer columns that should NOT be rounded
-            int_candidates = [
-                'INNINGS', 'INNING', 'RUNS', 'BALLS', 'WKTS', 'DISMISSALS', 
-                'MATCHES', 'MATCH ID', 'BATSMAN RUNS', 'BATRUNS', 'BOWLRUNS',
-                'TOTAL RUNS', 'FOURS', '4S', 'SIXES', '6S', 'DOTS', 'DOT BALLS',
-                'WICKETS', 'YEAR', 'SEASON'
-            ]
-            
-            # Get all numeric columns
-            numeric_cols = df_out.select_dtypes(include=['number']).columns.tolist()
-            
-            # Exclude integer columns from rounding
-            cols_to_round = [c for c in numeric_cols if c not in int_candidates]
-            
-            # Round to 2 decimal places
-            for nc in cols_to_round:
-                try:
-                    df_out[nc] = df_out[nc].round(2)
-                except Exception:
-                    pass
-            return df_out
 
         # Finalize and display helper
         def finalize_and_show(df_list, primary_col_name, title, header_color="#efe6ff"):
@@ -1760,19 +1765,23 @@ elif sidebar_option == "Matchup Analysis":
                 st.info(f"No {title.lower()} data available for this matchup.")
                 return
 
-            out = pd.concat(df_list, ignore_index=True).drop(columns=[batter_col, bowler_col], errors='ignore')
+            # Concatenate all formatted dataframes
+            out = pd.concat(df_list, ignore_index=True)
             
-            # Normalize display column names FIRST
+            # Remove batter and bowler columns if they exist
+            cols_to_drop = []
+            for col in out.columns:
+                col_lower = str(col).lower()
+                if any(x in col_lower for x in ['bat', 'bowl', 'batsman', 'bowler']):
+                    cols_to_drop.append(col)
+            
+            out = out.drop(columns=cols_to_drop, errors='ignore')
+            
+            # Now normalize display column names
             out = normalize_display_columns(out)
 
-            # Ensure primary column name is uppercase & spaced like our normalized columns
+            # Ensure primary column name is uppercase & spaced
             primary_col_name_norm = str(primary_col_name).upper().replace('_', ' ')
-
-            # CRITICAL: Apply formatting in correct order
-            # 1. First coerce integer columns
-            out = coerce_int_counts(out)
-            # 2. Then round remaining numeric columns to 2 decimals
-            out = round_numeric_cols(out)
 
             # Put primary column first if present
             cols = out.columns.tolist()
@@ -1803,14 +1812,16 @@ elif sidebar_option == "Matchup Analysis":
                     temp = tdf[tdf[year_col] == s].copy()
                     if temp.empty:
                         continue
-                    temp_summary = cumulator(temp)  # must return summary rows
+                    temp_summary = cumulator(temp)
                     temp_summary = as_dataframe(temp_summary)
                     if temp_summary.empty:
                         continue
-                    temp_summary.insert(0, 'YEAR', s)
+                    # FORMAT BEFORE ADDING TO LIST
+                    temp_summary = format_summary_df(temp_summary)
+                    temp_summary.insert(0, 'year', s)
                     all_seasons.append(temp_summary)
 
-                finalize_and_show(all_seasons, 'YEAR', "Yearwise Performance", header_color="#efe6ff")
+                finalize_and_show(all_seasons, 'year', "Yearwise Performance", header_color="#efe6ff")
 
         # -------------------
         # Match grouping
@@ -1830,10 +1841,12 @@ elif sidebar_option == "Matchup Analysis":
                     temp_summary = as_dataframe(temp_summary)
                     if temp_summary.empty:
                         continue
-                    temp_summary.insert(0, 'MATCH ID', m)
+                    # FORMAT BEFORE ADDING TO LIST
+                    temp_summary = format_summary_df(temp_summary)
+                    temp_summary.insert(0, 'match_id', m)
                     all_matches.append(temp_summary)
 
-                finalize_and_show(all_matches, 'MATCH ID', "Matchwise Performance", header_color="#e6f7ff")
+                finalize_and_show(all_matches, 'match_id', "Matchwise Performance", header_color="#e6f7ff")
 
         # -------------------
         # Venue grouping
@@ -1853,10 +1866,12 @@ elif sidebar_option == "Matchup Analysis":
                     temp_summary = as_dataframe(temp_summary)
                     if temp_summary.empty:
                         continue
-                    temp_summary.insert(0, 'VENUE', v)
+                    # FORMAT BEFORE ADDING TO LIST
+                    temp_summary = format_summary_df(temp_summary)
+                    temp_summary.insert(0, 'venue', v)
                     all_venues.append(temp_summary)
 
-                finalize_and_show(all_venues, 'VENUE', "Venuewise Performance", header_color="#e6f7ff")
+                finalize_and_show(all_venues, 'venue', "Venuewise Performance", header_color="#e6f7ff")
 
         # -------------------
         # Inning grouping
@@ -1876,14 +1891,15 @@ elif sidebar_option == "Matchup Analysis":
                     temp_summary = as_dataframe(temp_summary)
                     if temp_summary.empty:
                         continue
-                    temp_summary.insert(0, 'INNING', inn)
+                    # FORMAT BEFORE ADDING TO LIST
+                    temp_summary = format_summary_df(temp_summary)
+                    temp_summary.insert(0, 'inning', inn)
                     all_inns.append(temp_summary)
 
-                finalize_and_show(all_inns, 'INNING', "Inningwise Performance", header_color="#e6f7ff")
+                finalize_and_show(all_inns, 'inning', "Inningwise Performance", header_color="#e6f7ff")
 
         else:
             st.info("Unknown grouping option selected.")
-
 
 
         
