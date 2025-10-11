@@ -1817,13 +1817,15 @@ elif sidebar_option == "Matchup Analysis":
                         continue
                     temp_summary = cumulator(temp)
                     temp_summary=round_up_floats(temp_summary)
-                    # st.write(temp_summary)
+                    st.write(temp_summary)
                     # temp_summary = as_dataframe(temp_summary)
                     if temp_summary.empty:
                         continue
                     # FORMAT BEFORE ADDING TO LIST
                     temp_summary = format_summary_df(temp_summary)
+                    st.write(temp_summary)
                     temp_summary=round_up_floats(temp_summary)
+                    st.write(temp_summary)
                     temp_summary.insert(0, 'year', s)
                     all_seasons.append(temp_summary)
 
