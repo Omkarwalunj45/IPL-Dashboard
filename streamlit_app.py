@@ -1801,7 +1801,15 @@ elif sidebar_option == "Matchup Analysis":
             #     {"selector": "tbody tr:nth-child(odd)", "props": [("background-color", "#ffffff")]},
             #     {"selector": "tbody tr:nth-child(even)", "props": [("background-color", "#f7f7fb")]},
             # ]
+            def beautify_columns(df):
+                df.columns = [
+                    ' '.join(word.capitalize() for word in str(col).replace('_', ' ').split())
+                    for col in df.columns
+                ]
+                return df
             
+            # Example usage:
+            out = beautify_columns(out)
             st.markdown(f"### {title}")
             st.write(out)
             # st.dataframe(out.style.set_table_styles(table_styles), use_container_width=True)
