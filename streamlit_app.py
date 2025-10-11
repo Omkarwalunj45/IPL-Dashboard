@@ -1974,4 +1974,344 @@ elif sidebar_option == "Matchup Analysis":
         else:
             st.info("Unknown grouping option selected.")
 
+
+elif sidebar_option == "Match by Match Analysis":
+    st.header("Match by Match Analysis")
+
+    # --------- Defensive helpers/fallbacks ----------
+    try:
+        as_dataframe
+    except NameError:
+        def as_dataframe(x):
+            if isinstance(x, pd.Series):
+                return x.to_frame().T.reset_index(drop=True)
+            elif isinstance(x, pd.DataFrame):
+                return x.copy()
+            else:
+                return pd.DataFrame(x)
+
+    try:
+        safe_get_col
+    except NameError:
+        def safe_get_col(df_local, candidates, default=None):
+            for c in candidates:
+                if c in df_local.columns:
+                    return c
+            return default
+
+    # cumulator must exist for aggregated summaries (we will still show ball-level visuals without it)
+    have_cumulator = 'cumulator' in globals() or 'cumulator' in locals()
+
+    # --------- Ensure raw dataframe exists ----------
+    try:
+        df
+    except NameError:
+        st.error("Raw ball-by-ball dataframe 'df' not found. Load your data first.")
+        st.stop()
+
+    bdf = as_dataframe(df)
+
+    # --------- Detect columns in this dataset ----------
+    match_col   = safe_get_col(bdf, ['p_match', 'match_id'], default=None)
+    batter_col  = safe_get_col(bdf, ['bat', 'batsman'], default=None)
+    bowler_col  = safe_get_col(bdf, ['bowl', 'bowler'], default=None)
+    batting_team_col = safe_get_col(bdf, ['team_bat','batting_team','team_batting'], default=None)
+    bowling_team_col = safe_get_col(bdf, ['team_bowl','bowling_team','team_bow'], default=None)
+    venue_col   = safe_get_col(bdf, ['ground', 'venue', 'stadium', 'ground_name'], default=None)
+    start_date_col = safe_get_col(bdf, ['start_date','date','match_date'], default=None)
+
+    # basic sanity
+    if match_col is None:
+        st.error("No match id column found (expecting 'p_match' or 'match_id').")
+        st.stop()
+
+    # --------- Build match selector ----------
+    match_ids = sorted(bdf[match_col].dropna().unique().tolist())
+    if not match_ids:
+        st.error("No matches found in dataset.")
+        st.stop()
+
+    match_id = st.selectbox("Select Match ID", options=match_ids, index=0)
+    # choose the first row of that match for metadata
+    match_rows = bdf[bdf[match_col] == match_id]
+    if match_rows.empty:
+        st.error("No rows for selected match.")
+        st.stop()
+
+    # metadata
+    first_row = match_rows.iloc[0]
+    batting_team = first_row.get(batting_team_col, "Unknown")
+    bowling_team = first_row.get(bowling_team_col, "Unknown")
+    venue = first_row.get(venue_col, "Unknown")
+    start_date = first_row.get(start_date_col, "")
+
+    st.markdown(f"**{batting_team}** vs **{bowling_team}**")
+    st.markdown(f"**Venue:** {venue}   |   **Start Date:** {start_date}")
+
+    # subset for selected match
+    temp_df = match_rows.copy()
+
+    # ---------- Ensure essential batter/bowler columns exist for analysis ----------
+    if batter_col is None or bowler_col is None:
+        st.error("Dataset must contain batter and bowler columns ('bat'/'batsman' and 'bowl'/'bowler').")
+        st.stop()
+
+    # ---------- Option selection ----------
+    option = st.selectbox("Select Analysis Dimension", ("Batsman Analysis", "Bowler Analysis"))
+
+    # ---------- prepare derived helper columns ----------
+    # unify run column detection
+    run_col = safe_get_col(temp_df, ['batruns', 'batsman_runs', 'score'], default=None)
+    balls_faced_col = safe_get_col(temp_df, ['ballfaced', 'cur_bat_bf', 'ball_faced'], default=None)
+
+    # normalize numeric columns defensively
+    if run_col:
+        temp_df[run_col] = pd.to_numeric(temp_df[run_col], errors='coerce').fillna(0)
+    if balls_faced_col:
+        temp_df[balls_faced_col] = pd.to_numeric(temp_df[balls_faced_col], errors='coerce').fillna(0)
+
+    # determine wicket flag: treat 'out' as numeric flag if present, else use dismissal text
+    # special_runout types (no bowler credit)
+    special_runout_types = set([
+        'run out', 'runout',
+        'obstructing the field', 'obstructing thefield', 'obstructing',
+        'retired out', 'retired not out (hurt)', 'retired not out', 'retired'
+    ])
+    if 'out' in temp_df.columns:
+        temp_df['out_flag'] = pd.to_numeric(temp_df['out'], errors='coerce').fillna(0).astype(int)
+    else:
+        temp_df['out_flag'] = 0
+    if 'dismissal' in temp_df.columns:
+        temp_df['dismissal_clean'] = temp_df['dismissal'].astype(str).str.lower().str.strip().replace({'nan':'','none':''})
+    else:
+        temp_df['dismissal_clean'] = ''
+
+    # compute simple is_wkt (1 if out_flag==1 and dismissal not in special list)
+    temp_df['is_wkt'] = temp_df.apply(
+        lambda r: 1 if (int(r.get('out_flag',0)) == 1 and str(r.get('dismissal_clean','')).strip() not in special_runout_types and str(r.get('dismissal_clean','')).strip() != '') else 0,
+        axis=1
+    )
+
+    # ---------- Batsman Analysis ----------
+    if option == "Batsman Analysis":
+        # choose batsman
+        bat_choices = sorted([x for x in temp_df[batter_col].dropna().unique() if str(x).strip() not in ("", "0")])
+        if not bat_choices:
+            st.info("No batsmen found in this match.")
+        else:
+            batsman_selected = st.selectbox("Select Batsman", options=bat_choices, index=0)
+
+            # filter data
+            filtered_df = temp_df[temp_df[batter_col] == batsman_selected].copy()
+
+            # Bowler selection (with 'All')
+            bowl_opts = ["All"] + sorted([x for x in filtered_df[bowler_col].dropna().unique() if str(x).strip() not in ("", "0")])
+            bowler_selected = st.selectbox("Select Bowler", options=bowl_opts, index=0)
+
+            if bowler_selected != "All":
+                final_df = filtered_df[filtered_df[bowler_col] == bowler_selected].copy()
+            else:
+                final_df = filtered_df.copy()
+
+            # Compute summary stats
+            runs_col = run_col
+            balls_col = balls_faced_col
+            total_runs = int(final_df[runs_col].sum()) if runs_col else 0
+            total_balls = int(final_df[balls_col].sum()) if balls_col else int(final_df.shape[0])
+            total_dismissals = int(final_df['is_wkt'].sum()) if 'is_wkt' in final_df.columns else 0
+            strike_rate = (total_runs / total_balls * 100) if total_balls > 0 else 0.0
+            avg_runs = (total_runs / total_dismissals) if total_dismissals > 0 else float(total_runs)
+
+            # scoring shot counts: try to use flags if present, else derive from run value
+            def sum_flag(colname):
+                return int(final_df[colname].sum()) if colname in final_df.columns else 0
+
+            total_zeros = sum_flag('is_dot') or int((final_df[runs_col] == 0).sum()) if runs_col else 0
+            total_ones = sum_flag('is_one') or int((final_df[runs_col] == 1).sum()) if runs_col else 0
+            total_twos = sum_flag('is_two') or int((final_df[runs_col] == 2).sum()) if runs_col else 0
+            total_threes = sum_flag('is_three') or int((final_df[runs_col] == 3).sum()) if runs_col else 0
+            total_fours = sum_flag('is_four') or int((final_df[runs_col] == 4).sum()) if runs_col else 0
+            total_sixes = sum_flag('is_six') or int((final_df[runs_col] == 6).sum()) if runs_col else 0
+
+            total_balls_for_percentage = total_zeros + total_ones + total_twos + total_threes + total_fours + total_sixes
+            pct = lambda v, total: (v/total*100) if total>0 else 0.0
+
+            # Display compact stats box (clean, no emoji)
+            st.markdown(f"### Analysis for Batsman: {batsman_selected}")
+            if bowler_selected == "All":
+                st.markdown("Against: All Bowlers")
+            else:
+                st.markdown(f"Against: {bowler_selected}")
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write("**Summary**")
+                st.write(f"Runs: {total_runs}")
+                st.write(f"Balls: {total_balls}")
+                st.write(f"Wickets (dismissals): {total_dismissals}")
+            with col2:
+                st.write("**Rates**")
+                st.write(f"Strike Rate: {strike_rate:.2f}")
+                st.write(f"Average (if dismissed >0): {avg_runs:.2f}")
+
+            # scoring shot breakdown
+            st.write("**Scoring Shots**")
+            st.write({
+                "0s": f"{total_zeros} ({pct(total_zeros, total_balls_for_percentage):.1f}%)",
+                "1s": f"{total_ones} ({pct(total_ones, total_balls_for_percentage):.1f}%)",
+                "2s": f"{total_twos} ({pct(total_twos, total_balls_for_percentage):.1f}%)",
+                "3s": f"{total_threes} ({pct(total_threes, total_balls_for_percentage):.1f}%)",
+                "4s": f"{total_fours} ({pct(total_fours, total_balls_for_percentage):.1f}%)",
+                "6s": f"{total_sixes} ({pct(total_sixes, total_balls_for_percentage):.1f}%)",
+            })
+
+            # If cumulator available, show per-batsman summary using it (single-row)
+            if have_cumulator:
+                try:
+                    summary_df = cumulator(final_df)
+                    if not summary_df.empty:
+                        # ensure ints & rounding
+                        for c in summary_df.columns:
+                            try:
+                                summary_df[c] = pd.to_numeric(summary_df[c], errors='coerce')
+                            except Exception:
+                                pass
+                        for col in summary_df.columns:
+                            if any(x in col.lower() for x in ['innings','runs','balls']):
+                                summary_df[col] = summary_df[col].fillna(0).astype(int)
+                            elif summary_df[col].dtype in ['float64','float32','float']:
+                                summary_df[col] = summary_df[col].round(2)
+                        st.markdown("### Summary Row")
+                        st.dataframe(summary_df, use_container_width=True)
+                except Exception as e:
+                    st.info("cumulator returned an error or invalid output; skipping aggregated summary.")
+
+            # Show wagon wheel if wagonZone + line + length available
+            if {'wagonZone','line','length','batruns'}.issubset(set(final_df.columns)) or {'wagonZone','line','length','batsman_runs'}.issubset(set(final_df.columns)):
+                final_df = final_df.copy()
+                # normalize batting style
+                final_df['batting_style'] = final_df.get('bat_hand', final_df.get('batting_style', 'RHB'))
+                final_df['batsman_runs'] = final_df.get('batruns', final_df.get('batsman_runs', final_df.get('score', 0)))
+                # small helper for sector angle
+                @st.cache_data
+                def get_sector_angle(zone, batting_style, offset=0):
+                    base_angles = {1:45,2:90,3:135,4:180,5:225,6:270,7:315,8:360}
+                    angle = base_angles.get(int(zone), 0) + offset
+                    if str(batting_style).upper().startswith('L'):
+                        angle = (180 + angle) % 360
+                    return np.radians(angle)
+
+                @st.cache_data
+                def get_line_props(runs):
+                    mapping = {1: {'length':0.5,'width':2.5},2:{'length':0.65,'width':2.5},3:{'length':0.8,'width':2.5},4:{'length':1.0,'width':3},6:{'length':1.1,'width':4}}
+                    return mapping.get(int(runs), {'length':0.4,'width':1})
+                
+                st.markdown("### Wagon Wheel")
+                fig, ax = plt.subplots(figsize=(6,6))
+                ax.set_aspect('equal'); ax.axis('off')
+                # draw simple field
+                boundary = plt.Circle((0,0),1, color='#228B22', zorder=0)
+                ax.add_patch(boundary)
+                # plot shots
+                shots = final_df[final_df['batsman_runs']>0]
+                for _, s in shots.iterrows():
+                    try:
+                        angle = get_sector_angle(s['wagonZone'], s['batting_style'])
+                        props = get_line_props(s['batsman_runs'])
+                        x = props['length']*np.cos(angle); y = props['length']*np.sin(angle)
+                        ax.plot([0,x],[0,y], linewidth=props['width'])
+                    except Exception:
+                        continue
+                st.pyplot(fig, use_container_width=True)
+
+    # ---------- Bowler Analysis ----------
+    elif option == "Bowler Analysis":
+        # choose bowler
+        bowler_choices = sorted([x for x in temp_df[bowler_col].dropna().unique() if str(x).strip() not in ("","0")])
+        if not bowler_choices:
+            st.info("No bowlers found in this match.")
+        else:
+            bowler_selected = st.selectbox("Select Bowler", options=bowler_choices, index=0)
+
+            filtered_df = temp_df[temp_df[bowler_col] == bowler_selected].copy()
+
+            # bowling summary
+            # runs conceded: sum of score/batruns where byes and legbyes ==0
+            runs_given = 0
+            if 'score' in filtered_df.columns:
+                # treat score as runs off bat; only add when byes & legbyes are zero (they are extras)
+                cond = (~filtered_df.get('byes', 0).astype(bool)) & (~filtered_df.get('legbyes',0).astype(bool))
+                runs_given = int(filtered_df.loc[cond, 'score'].sum() if 'score' in filtered_df.columns else 0)
+            elif 'batruns' in filtered_df.columns:
+                cond = (~filtered_df.get('byes', 0).astype(bool)) & (~filtered_df.get('legbyes',0).astype(bool))
+                runs_given = int(filtered_df.loc[cond, 'batruns'].sum())
+            else:
+                runs_given = int(filtered_df.get('bowlruns', filtered_df.get('total_runs', 0)).sum())
+
+            balls_bowled = int(filtered_df.get('legal_ball', filtered_df.get('legal_ball', filtered_df.get('legal_ball', filtered_df.get('legal_ball',0)))) .sum()) if 'legal_ball' in filtered_df.columns else int(filtered_df.get('noball',0).apply(lambda x: 0).sum())  # fallback
+
+            # but safer: compute legal balls now (wide & noball both zero)
+            filtered_df['noball'] = pd.to_numeric(filtered_df.get('noball',0), errors='coerce').fillna(0).astype(int)
+            filtered_df['wide'] = pd.to_numeric(filtered_df.get('wide',0), errors='coerce').fillna(0).astype(int)
+            filtered_df['legal_ball'] = ((filtered_df['noball'] == 0) & (filtered_df['wide'] == 0)).astype(int)
+            balls_bowled = int(filtered_df['legal_ball'].sum())
+
+            wickets = int(filtered_df['is_wkt'].sum()) if 'is_wkt' in filtered_df.columns else int(filtered_df['is_wkt'].sum()) if 'is_wkt' in filtered_df.columns else 0
+            econ = (runs_given * 6.0 / balls_bowled) if balls_bowled>0 else float('nan')
+            avg = (runs_given / wickets) if wickets>0 else float('nan')
+            sr = (balls_bowled / wickets) if wickets>0 else float('nan')
+
+            st.markdown(f"### Bowling Analysis for {bowler_selected}")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write(f"Runs conceded: {runs_given}")
+                st.write(f"Balls (legal): {balls_bowled}")
+                st.write(f"Wickets (credited): {wickets}")
+            with col2:
+                st.write(f"Econ: {econ:.2f}" if not np.isnan(econ) else "Econ: -")
+                st.write(f"Avg: {avg:.2f}" if not np.isnan(avg) else "Avg: -")
+                st.write(f"SR (balls/wicket): {sr:.2f}" if not np.isnan(sr) else "SR: -")
+
+            # Show heatmaps if line/length present
+            if {'line','length','batruns'}.issubset(set(filtered_df.columns)) or {'line','length','batsman_runs'}.issubset(set(filtered_df.columns)):
+                final_df = filtered_df.copy()
+                # ensure required mapping
+                line_positions = {
+                    'WIDE_OUTSIDE_OFFSTUMP': 0, 'OUTSIDE_OFFSTUMP': 1, 'ON_THE_STUMPS': 2,
+                    'DOWN_LEG': 3, 'WIDE_DOWN_LEG': 4
+                }
+                length_positions = {
+                    'SHORT': 0, 'SHORT_OF_A_GOOD_LENGTH': 1, 'GOOD_LENGTH': 2, 'FULL': 3, 'YORKER': 4
+                }
+                run_count_grid = np.zeros((5,5))
+                wicket_count_grid = np.zeros((5,5))
+                filtered_plot_df = final_df.dropna(subset=['line','length'])
+                for _, row in filtered_plot_df.iterrows():
+                    line = row['line']; length = row['length']
+                    runs = int(row.get('batruns', row.get('batsman_runs', 0)))
+                    is_w = int(row.get('is_wkt', 0))
+                    li = line_positions.get(line); le = length_positions.get(length)
+                    if li is None or le is None:
+                        continue
+                    run_count_grid[le, li] += runs
+                    wicket_count_grid[le, li] += is_w
+
+                @st.cache_data
+                def create_heatmap(grid, title):
+                    fig = go.Figure(data=go.Heatmap(z=grid, colorscale='Reds'))
+                    fig.update_layout(height=400, width=400, title=title)
+                    return fig
+
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.write("Wicket Count")
+                    st.plotly_chart(create_heatmap(wicket_count_grid, "Wickets"), use_container_width=True)
+                with c2:
+                    st.write("Runs Scored")
+                    st.plotly_chart(create_heatmap(run_count_grid, "Runs"), use_container_width=True)
+
+    else:
+        st.info("Choose a valid analysis option.")
+
+
         
