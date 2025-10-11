@@ -1739,6 +1739,7 @@ elif sidebar_option == "Matchup Analysis":
                 if df[nc].dtype == int:
                     continue
                 df[nc] = df[nc].round(2)
+            df=round_up_floats(df)
             
             return df
 
@@ -1825,6 +1826,7 @@ elif sidebar_option == "Matchup Analysis":
                     temp_summary=round_up_floats(temp_summary)
                     temp_summary.insert(0, 'year', s)
                     all_seasons.append(temp_summary)
+                    all_seasons=round_up_floats(all_seasons)
 
                 finalize_and_show(all_seasons, 'year', "Yearwise Performance", header_color="#efe6ff")
 
