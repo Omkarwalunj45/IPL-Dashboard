@@ -1884,8 +1884,8 @@ elif sidebar_option == "Matchup Analysis":
                 out['Bowler'] = str(bowler_name).upper()
                 
                 # Move them to the front if you want them as leading columns
-               cols = ['Batsman', 'Bowler'] + [c for c in out.columns if c not in ['Batsman', 'Bowler']]
-               out = out[cols]
+                cols = ['Batsman', 'Bowler'] + [c for c in out.columns if c not in ['Batsman', 'Bowler']]
+                out = out[cols]
                 csv = out.to_csv(index=False)
                 st.download_button(
                     label="Download raw matchup rows (CSV)",
