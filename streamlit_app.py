@@ -676,10 +676,10 @@ if sidebar_option == "Player Profile":
             player_stats.columns = [col.upper().replace('_', ' ') for col in player_stats.columns]
             player_stats = round_up_floats(player_stats)
 
-            # Clean integer-type columns
-            for c in ['RUNS', 'HUNDREDS', 'FIFTIES', 'THIRTIES', 'HIGHEST SCORE']:
-                if c in player_stats.columns:
-                    player_stats[c] = player_stats[c].fillna(0).astype(int)
+            # # Clean integer-type columns
+            # for c in ['RUNS', 'HUNDREDS', 'FIFTIES', 'THIRTIES', 'HIGHEST SCORE']:
+            #     if c in player_stats.columns:
+            #         player_stats[c] = player_stats[c].fillna(0).astype(int)
 
             st.markdown("### 🏏 Batting Statistics")
             st.table(player_stats.style.set_table_attributes("style='font-weight: bold;'"))
