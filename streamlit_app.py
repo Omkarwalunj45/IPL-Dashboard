@@ -1793,7 +1793,7 @@ elif sidebar_option == "Matchup Analysis":
 
     # ---------- Prepare grouped outputs ----------
     # Note: cumulator must exist and return DataFrame rows similar to your existing pipeline.
-    if not have_cumulator:
+    if not cumulator:
         st.error("cumulator() function not found in environment — aggregated summaries cannot be built.")
         st.stop()
 
