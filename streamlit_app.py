@@ -745,11 +745,6 @@ def bowlerstat(df: pd.DataFrame) -> pd.DataFrame:
 def build_idf(df_local):
     return Custom(df_local)
 
-# Make sure `df` (raw ball-by-ball) is defined earlier in your script.
-try:
-    df
-except NameError:
-    df = None
 
 sidebar_option = st.sidebar.radio(
     "Select an option:",
