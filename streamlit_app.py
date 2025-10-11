@@ -58,6 +58,29 @@ def categorize_phase(over):
     else:
         return 'Death'
 
+def bpd(balls, dismissals):
+    return balls / dismissals if dismissals > 0 else np.nan
+
+def bpb(balls, boundaries):
+    return balls / boundaries if boundaries > 0 else np.nan
+
+def bp6(balls, sixes):
+    return balls / sixes if sixes > 0 else np.nan
+
+def bp4(balls, fours):
+    return balls / fours if fours > 0 else np.nan
+
+def avg(runs, dismissals, innings):
+    return runs / dismissals if dismissals > 0 else np.nan
+
+def categorize_phase(over):
+    if over < 6:
+        return 'Powerplay'
+    elif over < 15:
+        return 'Middle'
+    else:
+        return 'Death'
+
 def cumulator(df: pd.DataFrame) -> pd.DataFrame:
     """
     Batting summary builder implementing:
@@ -206,9 +229,9 @@ def cumulator(df: pd.DataFrame) -> pd.DataFrame:
     total_runs = runs_per_match.groupby('batsman')['match_runs'].sum().reset_index().rename(columns={'match_runs': 'runs'})
     total_balls = runs_per_match.groupby('batsman')['match_balls'].sum().reset_index().rename(columns={'match_balls': 'balls'})
 
-    # dismissals: count per resolved dismissed_player
-    dismissals_df = d[d['dismissed_player'].notna()].groupby('dismissed_player').size().reset_index(name='dismissals')
-    dismissals_df = dismissals_df.rename(columns={'dismissed_player': 'batsman'})
+    # dismissals: count per resolved dismissed_player, ensuring unique dismissals
+    dismissals_df = d[d['dismissed_player'].notna()].groupby(['dismissed_player', 'match_id', 'inning']).size().reset_index(name='dismissals')
+    dismissals_df = dismissals_df.groupby('dismissed_player')['dismissals'].sum().reset_index().rename(columns={'dismissed_player': 'batsman'})
 
     # boundary & running counts
     fours = d.groupby('batsman')['is_four'].sum().reset_index().rename(columns={'is_four': 'fours'})
@@ -315,7 +338,8 @@ def cumulator(df: pd.DataFrame) -> pd.DataFrame:
     }, inplace=True)
 
     # Add phase dismissals
-    phase_dismissals = d[d['dismissed_player'].notna()].groupby(['dismissed_player', 'phase']).size().reset_index(name='Dismissals')
+    phase_dismissals = d[d['dismissed_player'].notna()].groupby(['dismissed_player', 'phase', 'match_id', 'inning']).size().reset_index(name='Dismissals')
+    phase_dismissals = phase_dismissals.groupby(['dismissed_player', 'phase'])['Dismissals'].sum().reset_index()
     phase_dismissals.rename(columns={'dismissed_player': 'batsman'}, inplace=True)
     phase_stats = phase_stats.merge(phase_dismissals, on=['batsman', 'phase'], how='left')
     phase_stats['Dismissals'] = phase_stats['Dismissals'].fillna(0).astype(int)
