@@ -1766,7 +1766,7 @@ elif sidebar_option == "Matchup Analysis":
                     cols_to_drop.append(col)
             
             out = out.drop(columns=cols_to_drop, errors='ignore')
-            
+            out=round_up_floats(out)
             # CRITICAL FORMATTING: Convert to numeric, then int for specific cols, round others
             for col in out.columns: 
                 out[col] = pd.to_numeric(out[col], errors='ignore')
@@ -1791,7 +1791,7 @@ elif sidebar_option == "Matchup Analysis":
             if primary_col_name_norm in cols:
                 new_order = [primary_col_name_norm] + [c for c in cols if c != primary_col_name_norm]
                 out = out[new_order]
-            out=round_up_floats(out)
+            
             # Basic light header styling
             table_styles = [
                 {"selector": "thead th", "props": [("background-color", header_color), ("color", "#000"), ("font-weight", "600")]},
