@@ -1440,209 +1440,209 @@ if sidebar_option == "Player Profile":
             else:
                 st.write("No detailed bowling metrics available.")
     
-    # Use the raw ball-by-ball df
-    bpdf = as_dataframe(df)
-    
-    # Determine actual bowler column in ball-by-ball (prioritize 'bowl' then 'bowler')
-    bowler_col = safe_get_col(bpdf, ['bowl', 'bowler'], default=None)
-    
-    # -------------------------
-    # Opponentwise Performance
-    # -------------------------
-    opp_candidates = ['team_bat', 'team_batting', 'batting_team', 'team_bowl']
-    opp_col = safe_get_col(bpdf, opp_candidates, default=None)
-    
-    if bowler_col is None:
-        st.info("Ball-by-ball data missing 'bowl'/'bowler' column; opponentwise breakdown not available.")
-    elif opp_col is None:
-        st.info("Could not detect opponent/team batting column (expected one of team_bat/team_batting/batting_team/team_bowl).")
-    else:
-        # Filter rows for this bowler name using actual column
-        opponents = sorted(bpdf[bpdf[bowler_col] == player_name][opp_col].dropna().unique().tolist())
-        all_opp = []
-        for opp in opponents:
-            temp = bpdf[(bpdf[bowler_col] == player_name) & (bpdf[opp_col] == opp)].copy()
-            if temp.empty:
-                continue
-            # bowlerstat will normalize 'bowl' -> 'bowler' internally
-            temp_summary = bowlerstat(temp)
-            temp_summary = as_dataframe(temp_summary)
-            if temp_summary.empty:
-                continue
-            temp_summary['OPPONENT'] = str(opp).upper()
-            # ensure OPPONENT first
-            cols = temp_summary.columns.tolist()
-            if 'OPPONENT' in temp_summary.columns:
-                temp_summary = temp_summary[['OPPONENT'] + [c for c in cols if c != 'OPPONENT']]
-            all_opp.append(temp_summary)
-    
-        if all_opp:
-            result_df = pd.concat(all_opp, ignore_index=True).drop(columns=['bowler'], errors='ignore')
-            result_df.columns = [str(col).upper().replace('_', ' ') for col in result_df.columns]
-    
-            # cast safe numeric columns
-            for c in ['RUNS', 'WKTS', 'BALLS', 'OVERS', 'ECON', 'AVG']:
-                if c in result_df.columns:
-                    result_df[c] = pd.to_numeric(result_df[c], errors='coerce').fillna(0)
-    
-            result_df = round_up_floats(result_df)
-    
-            # styling: light blue
-            opp_header_color = "#e6f2ff"
-            opp_table_styles = [
-                {"selector": "thead th", "props": [("background-color", opp_header_color), ("color", "#000"), ("font-weight", "600")]},
-                {"selector": "tbody tr:nth-child(odd)", "props": [("background-color", "#ffffff")]},
-                {"selector": "tbody tr:nth-child(even)", "props": [("background-color", "#f7fbff")]},
-            ]
-    
-            st.markdown("### Opponentwise Performance")
-            st.dataframe(result_df.style.set_table_styles(opp_table_styles), use_container_width=True)
+        # Use the raw ball-by-ball df
+        bpdf = as_dataframe(df)
+        
+        # Determine actual bowler column in ball-by-ball (prioritize 'bowl' then 'bowler')
+        bowler_col = safe_get_col(bpdf, ['bowl', 'bowler'], default=None)
+        
+        # -------------------------
+        # Opponentwise Performance
+        # -------------------------
+        opp_candidates = ['team_bat', 'team_batting', 'batting_team', 'team_bowl']
+        opp_col = safe_get_col(bpdf, opp_candidates, default=None)
+        
+        if bowler_col is None:
+            st.info("Ball-by-ball data missing 'bowl'/'bowler' column; opponentwise breakdown not available.")
+        elif opp_col is None:
+            st.info("Could not detect opponent/team batting column (expected one of team_bat/team_batting/batting_team/team_bowl).")
         else:
-            st.info("No opponentwise bowling summary available for this player.")
-    
-    # -------------------------
-    # Yearwise Performance (season/year)
-    # -------------------------
-    season_col = safe_get_col(bpdf, ['season', 'year'], default=None)
-    if bowler_col is None:
-        st.info("Ball-by-ball data missing 'bowl'/'bowler' column; yearwise breakdown not available.")
-    elif season_col is None:
-        st.info("Yearwise breakdown not available (missing 'season' / 'year' column).")
-    else:
-        tdf = bpdf[bpdf[bowler_col] == player_name].copy()
-        unique_seasons = sorted(tdf[season_col].dropna().unique().tolist())
-        all_seasons = []
-        for season in unique_seasons:
-            temp = tdf[tdf[season_col] == season].copy()
-            if temp.empty:
-                continue
-            temp_summary = bowlerstat(temp)
-            temp_summary = as_dataframe(temp_summary)
-            if temp_summary.empty:
-                continue
-            temp_summary['YEAR'] = season
-            # make YEAR first
-            cols = temp_summary.columns.tolist()
-            if 'YEAR' in temp_summary.columns:
-                temp_summary = temp_summary[['YEAR'] + [c for c in cols if c != 'YEAR']]
-            all_seasons.append(temp_summary)
-    
-        if all_seasons:
-            result_df = pd.concat(all_seasons, ignore_index=True).drop(columns=['bowler'], errors='ignore')
-            result_df.columns = [str(col).upper().replace('_', ' ') for col in result_df.columns]
-            result_df = round_up_floats(result_df)
-    
-            # light purple header
-            year_header_color = "#efe6ff"
-            year_table_styles = [
-                {"selector": "thead th", "props": [("background-color", year_header_color), ("color", "#000"), ("font-weight", "600")]},
-                {"selector": "tbody tr:nth-child(odd)", "props": [("background-color", "#ffffff")]},
-                {"selector": "tbody tr:nth-child(even)", "props": [("background-color", "#fbf7ff")]},
-            ]
-    
-            st.markdown("### Yearwise Bowling Performance")
-            st.dataframe(result_df.style.set_table_styles(year_table_styles), use_container_width=True)
+            # Filter rows for this bowler name using actual column
+            opponents = sorted(bpdf[bpdf[bowler_col] == player_name][opp_col].dropna().unique().tolist())
+            all_opp = []
+            for opp in opponents:
+                temp = bpdf[(bpdf[bowler_col] == player_name) & (bpdf[opp_col] == opp)].copy()
+                if temp.empty:
+                    continue
+                # bowlerstat will normalize 'bowl' -> 'bowler' internally
+                temp_summary = bowlerstat(temp)
+                temp_summary = as_dataframe(temp_summary)
+                if temp_summary.empty:
+                    continue
+                temp_summary['OPPONENT'] = str(opp).upper()
+                # ensure OPPONENT first
+                cols = temp_summary.columns.tolist()
+                if 'OPPONENT' in temp_summary.columns:
+                    temp_summary = temp_summary[['OPPONENT'] + [c for c in cols if c != 'OPPONENT']]
+                all_opp.append(temp_summary)
+        
+            if all_opp:
+                result_df = pd.concat(all_opp, ignore_index=True).drop(columns=['bowler'], errors='ignore')
+                result_df.columns = [str(col).upper().replace('_', ' ') for col in result_df.columns]
+        
+                # cast safe numeric columns
+                for c in ['RUNS', 'WKTS', 'BALLS', 'OVERS', 'ECON', 'AVG']:
+                    if c in result_df.columns:
+                        result_df[c] = pd.to_numeric(result_df[c], errors='coerce').fillna(0)
+        
+                result_df = round_up_floats(result_df)
+        
+                # styling: light blue
+                opp_header_color = "#e6f2ff"
+                opp_table_styles = [
+                    {"selector": "thead th", "props": [("background-color", opp_header_color), ("color", "#000"), ("font-weight", "600")]},
+                    {"selector": "tbody tr:nth-child(odd)", "props": [("background-color", "#ffffff")]},
+                    {"selector": "tbody tr:nth-child(even)", "props": [("background-color", "#f7fbff")]},
+                ]
+        
+                st.markdown("### Opponentwise Performance")
+                st.dataframe(result_df.style.set_table_styles(opp_table_styles), use_container_width=True)
+            else:
+                st.info("No opponentwise bowling summary available for this player.")
+        
+        # -------------------------
+        # Yearwise Performance (season/year)
+        # -------------------------
+        season_col = safe_get_col(bpdf, ['season', 'year'], default=None)
+        if bowler_col is None:
+            st.info("Ball-by-ball data missing 'bowl'/'bowler' column; yearwise breakdown not available.")
+        elif season_col is None:
+            st.info("Yearwise breakdown not available (missing 'season' / 'year' column).")
         else:
-            st.info("No yearwise bowling summary available for this player.")
-    
-    # -------------------------
-    # Venuewise Performance (Bowling) — drop in after Yearwise
-    
-    bpdf = as_dataframe(df)  # raw ball-by-ball
-    # actual bowler column in your df is 'bowl' (bowlerstat normalizes it internally)
-    bowler_col = safe_get_col(bpdf, ['bowl', 'bowler'], default=None)
-    
-    venue_candidates = ['ground', 'venue', 'stadium', 'ground_name']
-    venue_col = safe_get_col(bpdf, venue_candidates, default=None)
-    
-    if bowler_col is None:
-        st.info("Venuewise bowling breakdown not available (missing 'bowl'/'bowler' column).")
-    elif venue_col is None:
-        st.info("Venuewise bowling breakdown not available (missing ground/venue/stadium column).")
-    else:
-        tdf = bpdf[bpdf[bowler_col] == player_name].copy()
-        unique_venues = sorted(tdf[venue_col].dropna().unique().tolist())
-        all_venues = []
-        for venue in unique_venues:
-            temp = tdf[tdf[venue_col] == venue].copy()
-            if temp.empty:
-                continue
-            temp_summary = bowlerstat(temp)
-            temp_summary = as_dataframe(temp_summary)
-            if temp_summary.empty:
-                continue
-            temp_summary['VENUE'] = venue.upper()
-            # ensure VENUE first
-            cols = temp_summary.columns.tolist()
-            if 'VENUE' in temp_summary.columns:
-                temp_summary = temp_summary[['VENUE'] + [c for c in cols if c != 'VENUE']]
-            all_venues.append(temp_summary)
-    
-        if all_venues:
-            result_df = pd.concat(all_venues, ignore_index=True).drop(columns=['bowler'], errors='ignore')
-            result_df.columns = [str(col).upper().replace('_', ' ') for col in result_df.columns]
-            # safe numeric casts
-            for c in ['RUNS', 'WKTS', 'BALLS', 'OVERS', 'ECON', 'AVG']:
-                if c in result_df.columns:
-                    result_df[c] = pd.to_numeric(result_df[c], errors='coerce').fillna(0)
-            result_df = round_up_floats(result_df)
-    
-            # Styling: light blue/teal for venue
-            venue_header_color = "#e6f7ff"
-            venue_table_styles = [
-                {"selector": "thead th", "props": [("background-color", venue_header_color), ("color", "#000"), ("font-weight", "600")]},
-                {"selector": "tbody tr:nth-child(odd)", "props": [("background-color", "#ffffff")]},
-                {"selector": "tbody tr:nth-child(even)", "props": [("background-color", "#f7fbff")]},
-            ]
-    
-            st.markdown("### Venuewise Performance")
-            st.dataframe(result_df.style.set_table_styles(venue_table_styles), use_container_width=True)
+            tdf = bpdf[bpdf[bowler_col] == player_name].copy()
+            unique_seasons = sorted(tdf[season_col].dropna().unique().tolist())
+            all_seasons = []
+            for season in unique_seasons:
+                temp = tdf[tdf[season_col] == season].copy()
+                if temp.empty:
+                    continue
+                temp_summary = bowlerstat(temp)
+                temp_summary = as_dataframe(temp_summary)
+                if temp_summary.empty:
+                    continue
+                temp_summary['YEAR'] = season
+                # make YEAR first
+                cols = temp_summary.columns.tolist()
+                if 'YEAR' in temp_summary.columns:
+                    temp_summary = temp_summary[['YEAR'] + [c for c in cols if c != 'YEAR']]
+                all_seasons.append(temp_summary)
+        
+            if all_seasons:
+                result_df = pd.concat(all_seasons, ignore_index=True).drop(columns=['bowler'], errors='ignore')
+                result_df.columns = [str(col).upper().replace('_', ' ') for col in result_df.columns]
+                result_df = round_up_floats(result_df)
+        
+                # light purple header
+                year_header_color = "#efe6ff"
+                year_table_styles = [
+                    {"selector": "thead th", "props": [("background-color", year_header_color), ("color", "#000"), ("font-weight", "600")]},
+                    {"selector": "tbody tr:nth-child(odd)", "props": [("background-color", "#ffffff")]},
+                    {"selector": "tbody tr:nth-child(even)", "props": [("background-color", "#fbf7ff")]},
+                ]
+        
+                st.markdown("### Yearwise Bowling Performance")
+                st.dataframe(result_df.style.set_table_styles(year_table_styles), use_container_width=True)
+            else:
+                st.info("No yearwise bowling summary available for this player.")
+        
+        # -------------------------
+        # Venuewise Performance (Bowling) — drop in after Yearwise
+        
+        bpdf = as_dataframe(df)  # raw ball-by-ball
+        # actual bowler column in your df is 'bowl' (bowlerstat normalizes it internally)
+        bowler_col = safe_get_col(bpdf, ['bowl', 'bowler'], default=None)
+        
+        venue_candidates = ['ground', 'venue', 'stadium', 'ground_name']
+        venue_col = safe_get_col(bpdf, venue_candidates, default=None)
+        
+        if bowler_col is None:
+            st.info("Venuewise bowling breakdown not available (missing 'bowl'/'bowler' column).")
+        elif venue_col is None:
+            st.info("Venuewise bowling breakdown not available (missing ground/venue/stadium column).")
         else:
-            st.info("No venuewise bowling summary available for this player.")
-    
-    
-    # -------------------------
-    # Inningwise Performance
-    # -------------------------
-    inning_col = safe_get_col(bpdf, ['inns', 'inning'], default=None)
-    if bowler_col is None:
-        st.info("Ball-by-ball data missing 'bowl'/'bowler' column; inningwise breakdown not available.")
-    elif inning_col is None:
-        st.info("Inningwise breakdown not available (missing 'inns'/'inning' column).")
-    else:
-        tdf = bpdf[bpdf[bowler_col] == player_name].copy()
-        innings_list = []
-        for inn in sorted(tdf[inning_col].dropna().unique()):
-            temp = tdf[tdf[inning_col] == inn].copy()
-            if temp.empty:
-                continue
-            temp_summary = bowlerstat(temp)
-            temp_summary = as_dataframe(temp_summary)
-            if temp_summary.empty:
-                continue
-            temp_summary['INNING'] = inn
-            cols = temp_summary.columns.tolist()
-            if 'INNING' in temp_summary.columns:
-                temp_summary = temp_summary[['INNING'] + [c for c in cols if c != 'INNING']]
-            innings_list.append(temp_summary)
-    
-        if innings_list:
-            result_df = pd.concat(innings_list, ignore_index=True).drop(columns=['bowler'], errors='ignore')
-            result_df.columns = [str(col).upper().replace('_', ' ') for col in result_df.columns]
-            result_df = round_up_floats(result_df)
-    
-            # light green header
-            inning_header_color = "#e9f9ea"
-            inning_table_styles = [
-                {"selector": "thead th", "props": [("background-color", inning_header_color), ("color", "#000"), ("font-weight", "600")]},
-                {"selector": "tbody tr:nth-child(odd)", "props": [("background-color", "#ffffff")]},
-                {"selector": "tbody tr:nth-child(even)", "props": [("background-color", "#f3fff3")]},
-            ]
-    
-            st.markdown("### Inningwise Bowling Performance")
-            st.dataframe(result_df.style.set_table_styles(inning_table_styles), use_container_width=True)
+            tdf = bpdf[bpdf[bowler_col] == player_name].copy()
+            unique_venues = sorted(tdf[venue_col].dropna().unique().tolist())
+            all_venues = []
+            for venue in unique_venues:
+                temp = tdf[tdf[venue_col] == venue].copy()
+                if temp.empty:
+                    continue
+                temp_summary = bowlerstat(temp)
+                temp_summary = as_dataframe(temp_summary)
+                if temp_summary.empty:
+                    continue
+                temp_summary['VENUE'] = venue.upper()
+                # ensure VENUE first
+                cols = temp_summary.columns.tolist()
+                if 'VENUE' in temp_summary.columns:
+                    temp_summary = temp_summary[['VENUE'] + [c for c in cols if c != 'VENUE']]
+                all_venues.append(temp_summary)
+        
+            if all_venues:
+                result_df = pd.concat(all_venues, ignore_index=True).drop(columns=['bowler'], errors='ignore')
+                result_df.columns = [str(col).upper().replace('_', ' ') for col in result_df.columns]
+                # safe numeric casts
+                for c in ['RUNS', 'WKTS', 'BALLS', 'OVERS', 'ECON', 'AVG']:
+                    if c in result_df.columns:
+                        result_df[c] = pd.to_numeric(result_df[c], errors='coerce').fillna(0)
+                result_df = round_up_floats(result_df)
+        
+                # Styling: light blue/teal for venue
+                venue_header_color = "#e6f7ff"
+                venue_table_styles = [
+                    {"selector": "thead th", "props": [("background-color", venue_header_color), ("color", "#000"), ("font-weight", "600")]},
+                    {"selector": "tbody tr:nth-child(odd)", "props": [("background-color", "#ffffff")]},
+                    {"selector": "tbody tr:nth-child(even)", "props": [("background-color", "#f7fbff")]},
+                ]
+        
+                st.markdown("### Venuewise Performance")
+                st.dataframe(result_df.style.set_table_styles(venue_table_styles), use_container_width=True)
+            else:
+                st.info("No venuewise bowling summary available for this player.")
+        
+        
+        # -------------------------
+        # Inningwise Performance
+        # -------------------------
+        inning_col = safe_get_col(bpdf, ['inns', 'inning'], default=None)
+        if bowler_col is None:
+            st.info("Ball-by-ball data missing 'bowl'/'bowler' column; inningwise breakdown not available.")
+        elif inning_col is None:
+            st.info("Inningwise breakdown not available (missing 'inns'/'inning' column).")
         else:
-            st.info("No inningwise bowling summary available for this player.")
+            tdf = bpdf[bpdf[bowler_col] == player_name].copy()
+            innings_list = []
+            for inn in sorted(tdf[inning_col].dropna().unique()):
+                temp = tdf[tdf[inning_col] == inn].copy()
+                if temp.empty:
+                    continue
+                temp_summary = bowlerstat(temp)
+                temp_summary = as_dataframe(temp_summary)
+                if temp_summary.empty:
+                    continue
+                temp_summary['INNING'] = inn
+                cols = temp_summary.columns.tolist()
+                if 'INNING' in temp_summary.columns:
+                    temp_summary = temp_summary[['INNING'] + [c for c in cols if c != 'INNING']]
+                innings_list.append(temp_summary)
+        
+            if innings_list:
+                result_df = pd.concat(innings_list, ignore_index=True).drop(columns=['bowler'], errors='ignore')
+                result_df.columns = [str(col).upper().replace('_', ' ') for col in result_df.columns]
+                result_df = round_up_floats(result_df)
+        
+                # light green header
+                inning_header_color = "#e9f9ea"
+                inning_table_styles = [
+                    {"selector": "thead th", "props": [("background-color", inning_header_color), ("color", "#000"), ("font-weight", "600")]},
+                    {"selector": "tbody tr:nth-child(odd)", "props": [("background-color", "#ffffff")]},
+                    {"selector": "tbody tr:nth-child(even)", "props": [("background-color", "#f3fff3")]},
+                ]
+        
+                st.markdown("### Inningwise Bowling Performance")
+                st.dataframe(result_df.style.set_table_styles(inning_table_styles), use_container_width=True)
+            else:
+                st.info("No inningwise bowling summary available for this player.")
 
 elif sidebar_option == "Matchup Analysis":
 
