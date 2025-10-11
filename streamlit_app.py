@@ -1768,24 +1768,26 @@ elif sidebar_option == "Matchup Analysis":
             out = out.drop(columns=cols_to_drop, errors='ignore')
             out=round_up_floats(out)
             st.write(out)
-            # CRITICAL FORMATTING: Convert to numeric, then int for specific cols, round others
-            # for col in out.columns: 
-            #     out[col] = pd.to_numeric(out[col], errors='ignore')
-            out=round_up_floats(out)
-            # for col in out.columns: 
-            #     if any(x in col.lower() for x in ['innings', 'runs', 'balls']):
-            #         out[col] = out[col].fillna(0).astype(int)
-                # elif out[col].dtype in ['float64', 'float32','float']:
-                #     out[col] = out[col].round(2)
             
-            # Replace None/NaN with dash
-            out = out.fillna('-')
+            # Convert to numeric where possible
+            for col in out.columns:
+                out[col] = pd.to_numeric(out[col], errors='ignore')
             
-            # Now normalize display column names
-            # out = normalize_display_columns(out)
+            # Convert specific columns to int, round others to 2 decimals
+            for col in out.columns:
+                if any(x in col.lower() for x in ['innings', 'runs', 'balls']):
+                    out[col] = out[col].fillna(0).astype(int)
+                elif out[col].dtype in ['float64', 'float32', 'float']:
+                    out[col] = out[col].round(2)
             
-            # Ensure primary column name is uppercase & spaced
-            primary_col_name_norm = str(primary_col_name).upper().replace('_', ' ')
+            # Replace None/NaN with 'sadh'
+            out = out.fillna('sadh')
+            
+            # Capitalize first letter of each column name
+            out.columns = [str(col).strip().capitalize() for col in out.columns]
+            
+            # Ensure primary column name is also capitalized
+            primary_col_name_norm = str(primary_col_name).strip().capitalize()
             
             # Put primary column first if present
             cols = out.columns.tolist()
@@ -1793,14 +1795,16 @@ elif sidebar_option == "Matchup Analysis":
                 new_order = [primary_col_name_norm] + [c for c in cols if c != primary_col_name_norm]
                 out = out[new_order]
             
-            # Basic light header styling
+            # Table styling
             table_styles = [
                 {"selector": "thead th", "props": [("background-color", header_color), ("color", "#000"), ("font-weight", "600")]},
                 {"selector": "tbody tr:nth-child(odd)", "props": [("background-color", "#ffffff")]},
                 {"selector": "tbody tr:nth-child(even)", "props": [("background-color", "#f7f7fb")]},
             ]
+            
             st.markdown(f"### {title}")
             st.dataframe(out.style.set_table_styles(table_styles), use_container_width=True)
+
 
         # -------------------
         # Year grouping
