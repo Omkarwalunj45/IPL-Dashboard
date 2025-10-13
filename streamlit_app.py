@@ -2164,9 +2164,9 @@ def compute_wagon_sectors(df,
 # -----------------------
 # Example usage (Streamlit)
 # -----------------------
-# sector_df, fig = compute_wagon_sectors(df, striker_name="Cameron Green", wagon_col='wagon', return_plot=True)
-# st.dataframe(sector_df) 
-# st.pyplot(fig)
+sector_df, fig = compute_wagon_sectors(df, striker_name="Cameron Green", wagon_col='wagon', return_plot=True)
+st.dataframe(sector_df) 
+st.pyplot(fig)
 
 
         
