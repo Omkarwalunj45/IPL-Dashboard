@@ -1976,9 +1976,13 @@ elif sidebar_option == "Matchup Analysis":
 
 
 elif sidebar_option == "Match by Match Analysis":
+    import math
+    import matplotlib.pyplot as plt
+    import plotly.graph_objects as go
+
     st.header("Match by Match Analysis")
 
-    # --------- Defensive helpers/fallbacks ----------
+    # Defensive helpers/fallbacks
     try:
         as_dataframe
     except NameError:
@@ -1999,10 +2003,9 @@ elif sidebar_option == "Match by Match Analysis":
                     return c
             return default
 
-    # cumulator must exist for aggregated summaries (we will still show ball-level visuals without it)
     have_cumulator = 'cumulator' in globals() or 'cumulator' in locals()
 
-    # --------- Ensure raw dataframe exists ----------
+    # Ensure raw dataframe exists
     try:
         df
     except NameError:
@@ -2011,7 +2014,7 @@ elif sidebar_option == "Match by Match Analysis":
 
     bdf = as_dataframe(df)
 
-    # --------- Detect columns in this dataset ----------
+    # Detect columns
     match_col   = safe_get_col(bdf, ['p_match', 'match_id'], default=None)
     batter_col  = safe_get_col(bdf, ['bat', 'batsman'], default=None)
     bowler_col  = safe_get_col(bdf, ['bowl', 'bowler'], default=None)
@@ -2020,19 +2023,17 @@ elif sidebar_option == "Match by Match Analysis":
     venue_col   = safe_get_col(bdf, ['ground', 'venue', 'stadium', 'ground_name'], default=None)
     start_date_col = safe_get_col(bdf, ['start_date','date','match_date'], default=None)
 
-    # basic sanity
     if match_col is None:
         st.error("No match id column found (expecting 'p_match' or 'match_id').")
         st.stop()
 
-    # --------- Build match selector ----------
+    # Build match selector
     match_ids = sorted(bdf[match_col].dropna().unique().tolist())
     if not match_ids:
         st.error("No matches found in dataset.")
         st.stop()
 
     match_id = st.selectbox("Select Match ID", options=match_ids, index=0)
-    # choose the first row of that match for metadata
     match_rows = bdf[bdf[match_col] == match_id]
     if match_rows.empty:
         st.error("No rows for selected match.")
@@ -2048,30 +2049,25 @@ elif sidebar_option == "Match by Match Analysis":
     st.markdown(f"**{batting_team}** vs **{bowling_team}**")
     st.markdown(f"**Venue:** {venue}   |   **Start Date:** {start_date}")
 
-    # subset for selected match
     temp_df = match_rows.copy()
 
-    # ---------- Ensure essential batter/bowler columns exist for analysis ----------
     if batter_col is None or bowler_col is None:
         st.error("Dataset must contain batter and bowler columns ('bat'/'batsman' and 'bowl'/'bowler').")
         st.stop()
 
-    # ---------- Option selection ----------
     option = st.selectbox("Select Analysis Dimension", ("Batsman Analysis", "Bowler Analysis"))
 
-    # ---------- prepare derived helper columns ----------
     # unify run column detection
     run_col = safe_get_col(temp_df, ['batruns', 'batsman_runs', 'score'], default=None)
     balls_faced_col = safe_get_col(temp_df, ['ballfaced', 'cur_bat_bf', 'ball_faced'], default=None)
 
-    # normalize numeric columns defensively
+    # Normalize numeric columns defensively
     if run_col:
         temp_df[run_col] = pd.to_numeric(temp_df[run_col], errors='coerce').fillna(0)
     if balls_faced_col:
         temp_df[balls_faced_col] = pd.to_numeric(temp_df[balls_faced_col], errors='coerce').fillna(0)
 
-    # determine wicket flag: treat 'out' as numeric flag if present, else use dismissal text
-    # special_runout types (no bowler credit)
+    # wicket detection (non-runout dismissals count for bowler)
     special_runout_types = set([
         'run out', 'runout',
         'obstructing the field', 'obstructing thefield', 'obstructing',
@@ -2086,7 +2082,6 @@ elif sidebar_option == "Match by Match Analysis":
     else:
         temp_df['dismissal_clean'] = ''
 
-    # compute simple is_wkt (1 if out_flag==1 and dismissal not in special list)
     temp_df['is_wkt'] = temp_df.apply(
         lambda r: 1 if (int(r.get('out_flag',0)) == 1 and str(r.get('dismissal_clean','')).strip() not in special_runout_types and str(r.get('dismissal_clean','')).strip() != '') else 0,
         axis=1
@@ -2094,17 +2089,14 @@ elif sidebar_option == "Match by Match Analysis":
 
     # ---------- Batsman Analysis ----------
     if option == "Batsman Analysis":
-        # choose batsman
         bat_choices = sorted([x for x in temp_df[batter_col].dropna().unique() if str(x).strip() not in ("", "0")])
         if not bat_choices:
             st.info("No batsmen found in this match.")
         else:
             batsman_selected = st.selectbox("Select Batsman", options=bat_choices, index=0)
 
-            # filter data
             filtered_df = temp_df[temp_df[batter_col] == batsman_selected].copy()
 
-            # Bowler selection (with 'All')
             bowl_opts = ["All"] + sorted([x for x in filtered_df[bowler_col].dropna().unique() if str(x).strip() not in ("", "0")])
             bowler_selected = st.selectbox("Select Bowler", options=bowl_opts, index=0)
 
@@ -2113,30 +2105,30 @@ elif sidebar_option == "Match by Match Analysis":
             else:
                 final_df = filtered_df.copy()
 
-            # Compute summary stats
-            runs_col = run_col
-            balls_col = balls_faced_col
-            total_runs = int(final_df[runs_col].sum()) if runs_col else 0
-            total_balls = int(final_df[balls_col].sum()) if balls_col else int(final_df.shape[0])
-            total_dismissals = int(final_df['is_wkt'].sum()) if 'is_wkt' in final_df.columns else 0
+            # Ensure runs column for plotting/aggregation
+            final_df['batsman_runs'] = final_df.get('batruns', final_df.get('batsman_runs', final_df.get('score', 0))).astype(float)
+
+            # Summary numbers
+            total_runs = int(final_df['batsman_runs'].sum())
+            total_balls = int(final_df[balls_faced_col].sum()) if balls_faced_col else int(final_df.shape[0])
+            total_dismissals = int(final_df['is_wkt'].sum())
             strike_rate = (total_runs / total_balls * 100) if total_balls > 0 else 0.0
             avg_runs = (total_runs / total_dismissals) if total_dismissals > 0 else float(total_runs)
 
-            # scoring shot counts: try to use flags if present, else derive from run value
+            # scoring shot counts
             def sum_flag(colname):
                 return int(final_df[colname].sum()) if colname in final_df.columns else 0
 
-            total_zeros = sum_flag('is_dot') or int((final_df[runs_col] == 0).sum()) if runs_col else 0
-            total_ones = sum_flag('is_one') or int((final_df[runs_col] == 1).sum()) if runs_col else 0
-            total_twos = sum_flag('is_two') or int((final_df[runs_col] == 2).sum()) if runs_col else 0
-            total_threes = sum_flag('is_three') or int((final_df[runs_col] == 3).sum()) if runs_col else 0
-            total_fours = sum_flag('is_four') or int((final_df[runs_col] == 4).sum()) if runs_col else 0
-            total_sixes = sum_flag('is_six') or int((final_df[runs_col] == 6).sum()) if runs_col else 0
+            total_zeros = sum_flag('is_dot') or int((final_df['batsman_runs'] == 0).sum())
+            total_ones = sum_flag('is_one') or int((final_df['batsman_runs'] == 1).sum())
+            total_twos = sum_flag('is_two') or int((final_df['batsman_runs'] == 2).sum())
+            total_threes = sum_flag('is_three') or int((final_df['batsman_runs'] == 3).sum())
+            total_fours = sum_flag('is_four') or int((final_df['batsman_runs'] == 4).sum())
+            total_sixes = sum_flag('is_six') or int((final_df['batsman_runs'] == 6).sum())
 
             total_balls_for_percentage = total_zeros + total_ones + total_twos + total_threes + total_fours + total_sixes
             pct = lambda v, total: (v/total*100) if total>0 else 0.0
 
-            # Display compact stats box (clean, no emoji)
             st.markdown(f"### Analysis for Batsman: {batsman_selected}")
             if bowler_selected == "All":
                 st.markdown("Against: All Bowlers")
@@ -2145,17 +2137,16 @@ elif sidebar_option == "Match by Match Analysis":
 
             col1, col2 = st.columns(2)
             with col1:
-                st.write("**Summary**")
+                st.write("Summary")
                 st.write(f"Runs: {total_runs}")
                 st.write(f"Balls: {total_balls}")
                 st.write(f"Wickets (dismissals): {total_dismissals}")
             with col2:
-                st.write("**Rates**")
+                st.write("Rates")
                 st.write(f"Strike Rate: {strike_rate:.2f}")
                 st.write(f"Average (if dismissed >0): {avg_runs:.2f}")
 
-            # scoring shot breakdown
-            st.write("**Scoring Shots**")
+            st.write("Scoring Shots")
             st.write({
                 "0s": f"{total_zeros} ({pct(total_zeros, total_balls_for_percentage):.1f}%)",
                 "1s": f"{total_ones} ({pct(total_ones, total_balls_for_percentage):.1f}%)",
@@ -2165,12 +2156,11 @@ elif sidebar_option == "Match by Match Analysis":
                 "6s": f"{total_sixes} ({pct(total_sixes, total_balls_for_percentage):.1f}%)",
             })
 
-            # If cumulator available, show per-batsman summary using it (single-row)
+            # cumulator summary row
             if have_cumulator:
                 try:
                     summary_df = cumulator(final_df)
                     if not summary_df.empty:
-                        # ensure ints & rounding
                         for c in summary_df.columns:
                             try:
                                 summary_df[c] = pd.to_numeric(summary_df[c], errors='coerce')
@@ -2181,65 +2171,167 @@ elif sidebar_option == "Match by Match Analysis":
                                 summary_df[col] = summary_df[col].fillna(0).astype(int)
                             elif summary_df[col].dtype in ['float64','float32','float']:
                                 summary_df[col] = summary_df[col].round(2)
-                        st.markdown("### Summary Row")
+                        st.markdown("Summary Row")
                         st.dataframe(summary_df, use_container_width=True)
-                except Exception as e:
-                    st.info("cumulator returned an error or invalid output; skipping aggregated summary.")
+                except Exception:
+                    st.info("cumulator returned an error; skipping aggregated summary.")
 
-            # Show wagon wheel if wagonZone + line + length available
-            if {'wagonZone','line','length','batruns'}.issubset(set(final_df.columns)) or {'wagonZone','line','length','batsman_runs'}.issubset(set(final_df.columns)):
-                final_df = final_df.copy()
-                # normalize batting style
-                final_df['batting_style'] = final_df.get('bat_hand', final_df.get('batting_style', 'RHB'))
-                final_df['batsman_runs'] = final_df.get('batruns', final_df.get('batsman_runs', final_df.get('score', 0)))
-                # small helper for sector angle
-                @st.cache_data
-                def get_sector_angle(zone, batting_style, offset=0):
-                    base_angles = {1:45,2:90,3:135,4:180,5:225,6:270,7:315,8:360}
-                    angle = base_angles.get(int(zone), 0) + offset
-                    if str(batting_style).upper().startswith('L'):
-                        angle = (180 + angle) % 360
-                    return np.radians(angle)
+            # ========== NEW WAGON-WHEEL: 8 sectors, percent of runs per sector ==========
+            # Prepare data: ensure wagonZone exists and is numeric 1..8
+            if 'wagonZone' in final_df.columns:
+                ww = final_df.copy()
+                # Ensure numeric
+                ww['wagonZone_num'] = pd.to_numeric(ww['wagonZone'], errors='coerce')
+                # Use runs for sector sums
+                ww['batsman_runs'] = pd.to_numeric(ww.get('batsman_runs', ww.get(run_col, 0)), errors='coerce').fillna(0)
+                # Sum runs per sector (only sectors 1..8)
+                sector_sums = ww[ww['wagonZone_num'].between(1,8)].groupby('wagonZone_num')['batsman_runs'].sum().reindex(range(1,9), fill_value=0)
+                total_sector_runs = float(sector_sums.sum())
+                if total_sector_runs == 0:
+                    st.info("No runs recorded in wagonZone sectors for selected selection.")
+                else:
+                    # percentages rounded to 2 decimals
+                    sector_pct = (sector_sums / total_sector_runs * 100).round(2)
 
-                @st.cache_data
-                def get_line_props(runs):
-                    mapping = {1: {'length':0.5,'width':2.5},2:{'length':0.65,'width':2.5},3:{'length':0.8,'width':2.5},4:{'length':1.0,'width':3},6:{'length':1.1,'width':4}}
-                    return mapping.get(int(runs), {'length':0.4,'width':1})
-                
-                st.markdown("### Wagon Wheel")
-                fig, ax = plt.subplots(figsize=(6,6))
-                ax.set_aspect('equal'); ax.axis('off')
-                # draw simple field
-                boundary = plt.Circle((0,0),1, color='#228B22', zorder=0)
-                ax.add_patch(boundary)
-                # plot shots
-                shots = final_df[final_df['batsman_runs']>0]
-                for _, s in shots.iterrows():
-                    try:
-                        angle = get_sector_angle(s['wagonZone'], s['batting_style'])
-                        props = get_line_props(s['batsman_runs'])
-                        x = props['length']*np.cos(angle); y = props['length']*np.sin(angle)
-                        ax.plot([0,x],[0,y], linewidth=props['width'])
-                    except Exception:
+                    # Display table of sectors and percentages
+                    sector_df = pd.DataFrame({
+                        'Sector': [int(i) for i in sector_sums.index],
+                        'Runs': sector_sums.values.astype(int),
+                        'Pct_of_sector_runs': sector_pct.values
+                    })
+                    # Show numeric formatting
+                    st.markdown("### Wagon Wheel: Sector % of Runs (by wagonZone)")
+                    st.dataframe(sector_df, use_container_width=True)
+
+                    # Polar bar chart (matplotlib) for visual
+                    labels = [f"Sector {i}" for i in sector_df['Sector']]
+                    angles = [((i-1)+0.5) * (2*math.pi/8) for i in sector_df['Sector']]  # center angles
+                    heights = sector_df['Pct_of_sector_runs'].values
+
+                    fig = plt.figure(figsize=(6,6))
+                    ax = fig.add_subplot(111, polar=True)
+                    ax.set_theta_offset(math.pi/2)  # start from top
+                    ax.set_theta_direction(-1)
+                    bars = ax.bar(
+                        [((i-1) * 2*math.pi/8) for i in sector_df['Sector']],    # start angle of each sector
+                        heights,
+                        width=2*math.pi/8,
+                        bottom=0,
+                        alpha=0.7
+                    )
+                    # annotate percent values
+                    for bar, pct_val, lab in zip(bars, heights, labels):
+                        angle = bar.get_x() + bar.get_width()/2
+                        r = bar.get_height()
+                        ax.text(angle, r + max(heights)*0.03, f"{pct_val:.2f}%", ha='center', va='bottom', fontsize=9)
+                    ax.set_yticklabels([])  # hide radial ticks
+                    ax.set_xticks([((i-1)+0.5) * 2*math.pi/8 for i in sector_df['Sector']])
+                    ax.set_xticklabels(labels)
+                    ax.set_title("Runs % by WagonZone (8 sectors)")
+                    st.pyplot(fig, use_container_width=True)
+            else:
+                st.info("wagonZone column not available — cannot plot wagon wheel sector percentages.")
+
+            # ========== NEW PITCH MAP: realistic 5x5 heatmap of line x length ==========
+            # mapping for 5 lines and 5 lengths - allow flexible label casing
+            line_map = {
+                'WIDE_OUTSIDE_OFFSTUMP': 0,
+                'OUTSIDE_OFFSTUMP': 1,
+                'ON_THE_STUMPS': 2,
+                'DOWN_LEG': 3,
+                'WIDE_DOWN_LEG': 4
+            }
+            length_map = {
+                'SHORT': 0,
+                'SHORT_OF_A_GOOD_LENGTH': 1,
+                'GOOD_LENGTH': 2,
+                'FULL': 3,
+                'YORKER': 4
+            }
+
+            # Build heatmap if line & length exist
+            if 'line' in final_df.columns and 'length' in final_df.columns:
+                pf = final_df.copy()
+                # Normalize categories (upper and stripped)
+                pf['line_norm'] = pf['line'].astype(str).str.strip().str.upper()
+                pf['length_norm'] = pf['length'].astype(str).str.strip().str.upper()
+                pf['batsman_runs'] = pd.to_numeric(pf.get('batsman_runs', pf.get(run_col, 0)), errors='coerce').fillna(0)
+                pf['is_wkt'] = pf.get('is_wkt', 0).astype(int)
+
+                # initialize grids
+                run_grid = np.zeros((5,5), dtype=float)
+                wkt_grid = np.zeros((5,5), dtype=float)
+                # iterate rows and accumulate into corresponding cell if mapping exists
+                for _, row in pf.iterrows():
+                    li = line_map.get(row['line_norm'], None)
+                    le = length_map.get(row['length_norm'], None)
+                    if li is None or le is None:
                         continue
-                st.pyplot(fig, use_container_width=True)
+                    run_grid[le, li] += float(row['batsman_runs'])
+                    wkt_grid[le, li] += int(row['is_wkt'])
+
+                total_runs_in_map = run_grid.sum()
+                # build annotated text as "runs\npct%"
+                text_grid = np.empty(run_grid.shape, dtype=object)
+                for i in range(5):
+                    for j in range(5):
+                        runs_val = int(run_grid[i,j])
+                        pct_val = (run_grid[i,j] / total_runs_in_map * 100) if total_runs_in_map > 0 else 0.0
+                        text_grid[i,j] = f"{runs_val}\n{pct_val:.2f}%"
+
+                # Labels order: x ticks (line) left->right; y ticks (length) top->bottom
+                x_labels = ['Wide Outside Off', 'Outside Off', 'On the Stumps', 'Down Leg', 'Wide Down Leg']
+                y_labels = ['Short', 'Short of a Good Length', 'Good Length', 'Full', 'Yorker']
+
+                # Plotly heatmap for runs with annotations
+                fig_runs = go.Figure(data=go.Heatmap(
+                    z=run_grid,
+                    x=x_labels,
+                    y=y_labels,
+                    text=text_grid,
+                    hovertemplate="%{y} / %{x}<br>Runs: %{z}<extra></extra>",
+                    colorscale='YlOrRd',
+                    reversescale=False
+                ))
+                fig_runs.update_layout(
+                    title="Pitchmap: Runs (sum) by Line x Length (rows=Length, cols=Line)",
+                    xaxis_title="Line",
+                    yaxis_title="Length",
+                    height=450,
+                )
+                st.markdown("### Pitchmap (Runs)")
+                st.plotly_chart(fig_runs, use_container_width=True)
+
+                # Plotly heatmap for wickets (simple counts)
+                text_wk = np.empty(wkt_grid.shape, dtype=object)
+                for i in range(5):
+                    for j in range(5):
+                        text_wk[i,j] = str(int(wkt_grid[i,j]))
+                fig_wkt = go.Figure(data=go.Heatmap(
+                    z=wkt_grid,
+                    x=x_labels,
+                    y=y_labels,
+                    text=text_wk,
+                    hovertemplate="%{y} / %{x}<br>Wickets: %{z}<extra></extra>",
+                    colorscale='Blues',
+                ))
+                fig_wkt.update_layout(title="Pitchmap: Wickets (count)", xaxis_title="Line", yaxis_title="Length", height=450)
+                st.markdown("### Pitchmap (Wickets)")
+                st.plotly_chart(fig_wkt, use_container_width=True)
+            else:
+                st.info("line/length columns not present — pitchmap cannot be generated.")
 
     # ---------- Bowler Analysis ----------
     elif option == "Bowler Analysis":
-        # choose bowler
         bowler_choices = sorted([x for x in temp_df[bowler_col].dropna().unique() if str(x).strip() not in ("","0")])
         if not bowler_choices:
             st.info("No bowlers found in this match.")
         else:
             bowler_selected = st.selectbox("Select Bowler", options=bowler_choices, index=0)
-
             filtered_df = temp_df[temp_df[bowler_col] == bowler_selected].copy()
 
-            # bowling summary
             # runs conceded: sum of score/batruns where byes and legbyes ==0
-            runs_given = 0
             if 'score' in filtered_df.columns:
-                # treat score as runs off bat; only add when byes & legbyes are zero (they are extras)
                 cond = (~filtered_df.get('byes', 0).astype(bool)) & (~filtered_df.get('legbyes',0).astype(bool))
                 runs_given = int(filtered_df.loc[cond, 'score'].sum() if 'score' in filtered_df.columns else 0)
             elif 'batruns' in filtered_df.columns:
@@ -2248,15 +2340,12 @@ elif sidebar_option == "Match by Match Analysis":
             else:
                 runs_given = int(filtered_df.get('bowlruns', filtered_df.get('total_runs', 0)).sum())
 
-            balls_bowled = int(filtered_df.get('legal_ball', filtered_df.get('legal_ball', filtered_df.get('legal_ball', filtered_df.get('legal_ball',0)))) .sum()) if 'legal_ball' in filtered_df.columns else int(filtered_df.get('noball',0).apply(lambda x: 0).sum())  # fallback
-
-            # but safer: compute legal balls now (wide & noball both zero)
             filtered_df['noball'] = pd.to_numeric(filtered_df.get('noball',0), errors='coerce').fillna(0).astype(int)
             filtered_df['wide'] = pd.to_numeric(filtered_df.get('wide',0), errors='coerce').fillna(0).astype(int)
             filtered_df['legal_ball'] = ((filtered_df['noball'] == 0) & (filtered_df['wide'] == 0)).astype(int)
             balls_bowled = int(filtered_df['legal_ball'].sum())
 
-            wickets = int(filtered_df['is_wkt'].sum()) if 'is_wkt' in filtered_df.columns else int(filtered_df['is_wkt'].sum()) if 'is_wkt' in filtered_df.columns else 0
+            wickets = int(filtered_df['is_wkt'].sum()) if 'is_wkt' in filtered_df.columns else 0
             econ = (runs_given * 6.0 / balls_bowled) if balls_bowled>0 else float('nan')
             avg = (runs_given / wickets) if wickets>0 else float('nan')
             sr = (balls_bowled / wickets) if wickets>0 else float('nan')
@@ -2272,46 +2361,67 @@ elif sidebar_option == "Match by Match Analysis":
                 st.write(f"Avg: {avg:.2f}" if not np.isnan(avg) else "Avg: -")
                 st.write(f"SR (balls/wicket): {sr:.2f}" if not np.isnan(sr) else "SR: -")
 
-            # Show heatmaps if line/length present
-            if {'line','length','batruns'}.issubset(set(filtered_df.columns)) or {'line','length','batsman_runs'}.issubset(set(filtered_df.columns)):
-                final_df = filtered_df.copy()
-                # ensure required mapping
-                line_positions = {
-                    'WIDE_OUTSIDE_OFFSTUMP': 0, 'OUTSIDE_OFFSTUMP': 1, 'ON_THE_STUMPS': 2,
-                    'DOWN_LEG': 3, 'WIDE_DOWN_LEG': 4
+            # Pitch heatmaps for bowler (reuse same mapping and plotting)
+            if 'line' in filtered_df.columns and 'length' in filtered_df.columns:
+                pf = filtered_df.copy()
+                # Normalize and compute grids (same as above)
+                line_map = {
+                    'WIDE_OUTSIDE_OFFSTUMP': 0,
+                    'OUTSIDE_OFFSTUMP': 1,
+                    'ON_THE_STUMPS': 2,
+                    'DOWN_LEG': 3,
+                    'WIDE_DOWN_LEG': 4
                 }
-                length_positions = {
-                    'SHORT': 0, 'SHORT_OF_A_GOOD_LENGTH': 1, 'GOOD_LENGTH': 2, 'FULL': 3, 'YORKER': 4
+                length_map = {
+                    'SHORT': 0,
+                    'SHORT_OF_A_GOOD_LENGTH': 1,
+                    'GOOD_LENGTH': 2,
+                    'FULL': 3,
+                    'YORKER': 4
                 }
-                run_count_grid = np.zeros((5,5))
-                wicket_count_grid = np.zeros((5,5))
-                filtered_plot_df = final_df.dropna(subset=['line','length'])
-                for _, row in filtered_plot_df.iterrows():
-                    line = row['line']; length = row['length']
-                    runs = int(row.get('batruns', row.get('batsman_runs', 0)))
-                    is_w = int(row.get('is_wkt', 0))
-                    li = line_positions.get(line); le = length_positions.get(length)
-                    if li is None or le is None:
-                        continue
-                    run_count_grid[le, li] += runs
-                    wicket_count_grid[le, li] += is_w
+                pf['line_norm'] = pf['line'].astype(str).str.strip().str.upper()
+                pf['length_norm'] = pf['length'].astype(str).str.strip().str.upper()
+                pf['batsman_runs'] = pd.to_numeric(pf.get('batruns', pf.get('batsman_runs', 0)), errors='coerce').fillna(0)
+                pf['is_wkt'] = pf.get('is_wkt', 0).astype(int)
 
-                @st.cache_data
-                def create_heatmap(grid, title):
-                    fig = go.Figure(data=go.Heatmap(z=grid, colorscale='Reds'))
-                    fig.update_layout(height=400, width=400, title=title)
-                    return fig
+                run_grid = np.zeros((5,5), dtype=float)
+                wkt_grid = np.zeros((5,5), dtype=float)
+                for _, row in pf.iterrows():
+                    li = line_map.get(row['line_norm'], None)
+                    le = length_map.get(row['length_norm'], None)
+                    if li is None or le is None: continue
+                    run_grid[le, li] += float(row['batsman_runs'])
+                    wkt_grid[le, li] += int(row['is_wkt'])
 
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.write("Wicket Count")
-                    st.plotly_chart(create_heatmap(wicket_count_grid, "Wickets"), use_container_width=True)
-                with c2:
-                    st.write("Runs Scored")
-                    st.plotly_chart(create_heatmap(run_count_grid, "Runs"), use_container_width=True)
+                total_runs_in_map = run_grid.sum()
+                text_grid = np.empty(run_grid.shape, dtype=object)
+                for i in range(5):
+                    for j in range(5):
+                        runs_val = int(run_grid[i,j])
+                        pct_val = (run_grid[i,j] / total_runs_in_map * 100) if total_runs_in_map > 0 else 0.0
+                        text_grid[i,j] = f"{runs_val}\n{pct_val:.2f}%"
+
+                x_labels = ['Wide Outside Off', 'Outside Off', 'On the Stumps', 'Down Leg', 'Wide Down Leg']
+                y_labels = ['Short', 'Short of a Good Length', 'Good Length', 'Full', 'Yorker']
+
+                fig_runs = go.Figure(data=go.Heatmap(z=run_grid, x=x_labels, y=y_labels,
+                                                    text=text_grid, hovertemplate="%{y} / %{x}<br>Runs: %{z}<extra></extra>",
+                                                    colorscale='YlOrRd'))
+                fig_runs.update_layout(title="Pitchmap (Runs) for Bowler", height=450)
+                st.plotly_chart(fig_runs, use_container_width=True)
+
+                fig_wkt = go.Figure(data=go.Heatmap(z=wkt_grid, x=x_labels, y=y_labels,
+                                                   text=wkt_grid.astype(int), hovertemplate="%{y} / %{x}<br>Wickets: %{z}<extra></extra>",
+                                                   colorscale='Blues'))
+                fig_wkt.update_layout(title="Pitchmap (Wickets) for Bowler", height=450)
+                st.plotly_chart(fig_wkt, use_container_width=True)
+
+            else:
+                st.info("line/length columns not present — pitchmap cannot be generated for bowler.")
 
     else:
         st.info("Choose a valid analysis option.")
+
 
 
         
