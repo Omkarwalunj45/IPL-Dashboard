@@ -1973,6 +1973,91 @@ elif sidebar_option == "Matchup Analysis":
 
         else:
             st.info("Unknown grouping option selected.")
+
+# Put this near the top of your Streamlit app
+import io
+import math
+from io import BytesIO
+import streamlit as st
+from PIL import Image, ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True  # tolerates truncated images (optional)
+
+def safe_st_pyplot(fig,
+                   max_pixels: int = 40_000_000,
+                   fallback_set_max: bool = False,
+                   use_column_width: bool = True):
+    """
+    Render a Matplotlib Figure safely in Streamlit avoiding PIL DecompressionBombError.
+    - fig: matplotlib.figure.Figure
+    - max_pixels: maximum allowed pixel count (width_px * height_px). Default 40M.
+      (Pillow default is around ~89M; 40M is a conservative safe value.)
+    - fallback_set_max: if True, will set PIL.Image.MAX_IMAGE_PIXELS = None if all else fails.
+    - use_column_width: passed to st.image to use layout width.
+    """
+    try:
+        # compute px dims
+        dpi = fig.get_dpi()
+        width_in = fig.get_figwidth()
+        height_in = fig.get_figheight()
+        width_px = int(round(width_in * dpi))
+        height_px = int(round(height_in * dpi))
+        pixel_count = int(width_px) * int(height_px)
+
+        buf = BytesIO()
+
+        if pixel_count <= max_pixels:
+            # safe to save at original DPI
+            fig.savefig(buf, format="png", bbox_inches="tight")
+            buf.seek(0)
+            st.image(buf, use_column_width=use_column_width)
+            return
+        else:
+            # Need to scale - compute scale factor to bring pixel_count down to max_pixels
+            scale = math.sqrt(max_pixels / float(pixel_count))
+            if scale <= 0 or scale >= 1:
+                # fallback to small scale
+                scale = min(1.0, 0.7)
+            new_dpi = max(50, int(math.floor(dpi * scale)))  # keep DPI reasonable, min 50
+            # Save with new DPI
+            fig.savefig(buf, format="png", bbox_inches="tight", dpi=new_dpi)
+            buf.seek(0)
+            # Show smaller image
+            st.image(buf, use_column_width=use_column_width)
+            return
+
+    except Exception as e:
+        # If Pillow complains about DecompressionBomb or other issues, optionally relax MAX_IMAGE_PIXELS
+        err_str = str(e)
+        if ("DecompressionBombError" in err_str or "DecompressionBomb" in err_str) and fallback_set_max:
+            try:
+                from PIL import Image
+                Image.MAX_IMAGE_PIXELS = None  # dangerous but sometimes necessary
+                buf = BytesIO()
+                fig.savefig(buf, format="png", bbox_inches="tight")
+                buf.seek(0)
+                st.image(buf, use_column_width=use_column_width)
+                return
+            except Exception as e2:
+                st.error(f"still failed after disabling MAX_IMAGE_PIXELS: {e2}")
+                raise
+        else:
+            # As a last resort try an aggressive downscale and show a warning
+            try:
+                buf = BytesIO()
+                # save at tiny dpi to succeed
+                fig.savefig(buf, format="png", bbox_inches="tight", dpi=70)
+                buf.seek(0)
+                st.warning("Figure was too large; displayed at reduced resolution.")
+                st.image(buf, use_column_width=use_column_width)
+                return
+            except Exception as e3:
+                # final fallback: propagate original error for debug logs
+                st.error("Unable to render figure due to image size / PIL safety check.")
+                raise
+
+# Example usage: replace st.pyplot(fig, use_container_width=True) with:
+# safe_st_pyplot(fig, max_pixels=40_000_000, fallback_set_max=False)
+
 # Place in your app where you handle sidebar_option == "Match by Match Analysis"
 import streamlit as st
 import pandas as pd
@@ -2250,7 +2335,8 @@ if option == "Batsman Analysis":
             hand = batting_style.iloc[0] if (not batting_style.empty) else None
             hand_str = 'Right-handed' if pd.isna(hand) or str(hand).strip().upper().startswith('R') else 'Left-handed'
             ax.text(0, -1.45, f"Striker: {batsman_selected}  |  Style: {hand_str}  |  Total Runs in sectors: {total_runs_wagon}", ha='center', fontsize=10)
-            st.pyplot(fig, use_container_width=True)
+            safe_st_pyplot(fig, max_pixels=40_000_000, fallback_set_max=False)
+
 
             # show table below wheel
             st.dataframe(ww_display.style.set_table_styles([
